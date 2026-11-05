@@ -31,7 +31,8 @@ window.AppSSO = (function () {
 
   // Salesforceから戻ってくる先。Salesforce側の「コールバックURL」と完全に一致させる必要がある。
   function redirectUri() {
-    return window.location.origin + window.location.pathname;
+    // 「…/index.html」で開かれた場合も、コールバックURLは「…/」に揃える
+    return window.location.origin + window.location.pathname.replace(/index\.html$/, "");
   }
 
   function base64Url(bytes) {
