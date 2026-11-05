@@ -16,6 +16,7 @@ window.AppData = (function () {
     saves: "caseshelf_saves_v3",
     currentUser: "caseshelf_current_user_v3",
     seeded: "caseshelf_seeded_v3",
+    requests: "caseshelf_account_requests_v1",
   };
 
   function uid(prefix) {
@@ -68,11 +69,41 @@ window.AppData = (function () {
     return "hsl(" + hue + ",48%,46%)";
   }
 
+  // ---------- パスワードのハッシュ化 ----------
+  // パスワードはそのまま保存せず、SHA-256でハッシュ化した値だけを保存する。
+  // ※試作品ではハッシュ値もこの端末のブラウザ内に保存されるため、本当の意味での
+  //   セキュリティ（第三者からの保護）にはならない。本番ではサーバー側で認証する。
+  function hashPassword(userId, password) {
+    if (!window.crypto || !window.crypto.subtle) {
+      return Promise.reject(
+        new Error("このブラウザ環境ではパスワード処理ができません（https または localhost で開いてください）。")
+      );
+    }
+    var bytes = new TextEncoder().encode("caseshelf:" + userId + ":" + password);
+    return window.crypto.subtle.digest("SHA-256", bytes).then(function (buf) {
+      return Array.prototype.map
+        .call(new Uint8Array(buf), function (b) {
+          return ("0" + b.toString(16)).slice(-2);
+        })
+        .join("");
+    });
+  }
+
   // ---------- シードデータ（架空の案件・利用者） ----------
 
   var SEED_USERS = [
     {
+      id: "u_yadomi",
+      loginId: "yadomi-k@shoei-bijutsu.co.jp",
+      email: "yadomi-k@shoei-bijutsu.co.jp",
+      displayName: "yadomi-k",
+      role: "admin",
+      status: "active",
+      avatarImage: null,
+    },
+    {
       id: "u_admin1",
+      loginId: "sato",
       email: "admin.sato@example-sei.co.jp",
       displayName: "佐藤 management（管理者）",
       role: "admin",
@@ -81,6 +112,7 @@ window.AppData = (function () {
     },
     {
       id: "u_member1",
+      loginId: "yamada",
       email: "yamada@example-sei.co.jp",
       displayName: "山田 花子",
       role: "member",
@@ -89,6 +121,7 @@ window.AppData = (function () {
     },
     {
       id: "u_member2",
+      loginId: "tanaka",
       email: "tanaka@example-sei.co.jp",
       displayName: "田中 次郎",
       role: "member",
@@ -97,6 +130,7 @@ window.AppData = (function () {
     },
     {
       id: "u_suspended1",
+      loginId: "teishi",
       email: "suspended@example-sei.co.jp",
       displayName: "停止 三郎（利用停止サンプル）",
       role: "member",
@@ -275,6 +309,24 @@ window.AppData = (function () {
       writeJSON(KEYS.saves, {});
       writeJSON(KEYS.seeded, true);
     }
+    // ログインは基本的にSalesforceで行い、パスワードでのログインは管理者の緊急用のみとした。
+    // 以前のバージョンでサンプル利用者に付けていた共通パスワードは、抜け道にならないよう削除する。
+    var SAMPLE_IDS = ["u_admin1", "u_member1", "u_member2", "u_suspended1"];
+    var stored = readJSON(KEYS.users, SEED_USERS);
+    var migrated = stored.map(function (u) {
+      if (SAMPLE_IDS.indexOf(u.id) === -1 || !u.passwordHash) return u;
+      var copy = Object.assign({}, u);
+      delete copy.passwordHash;
+      return copy;
+    });
+    // 後から追加したサンプル利用者（例: 実際の利用者アカウント）が無ければ追加する
+    SEED_USERS.forEach(function (seed) {
+      var exists = migrated.some(function (u) {
+        return u.id === seed.id;
+      });
+      if (!exists) migrated.unshift(seed);
+    });
+    writeJSON(KEYS.users, migrated);
     // サンプル案件（seed_*）は毎回最新内容に同期する。利用者が投稿した案件はそのまま残す。
     writeJSON(KEYS.projects, upsertSeedProjects(readJSON(KEYS.projects, [])));
   }
@@ -298,6 +350,13 @@ window.AppData = (function () {
   }
   function saveSaves(obj) {
     return writeJSON(KEYS.saves, obj);
+  }
+  // 未登録の人からの利用登録の依頼
+  function loadRequests() {
+    return readJSON(KEYS.requests, []);
+  }
+  function saveRequests(list) {
+    return writeJSON(KEYS.requests, list);
   }
   function getCurrentUserId() {
     try {
@@ -332,9 +391,12 @@ window.AppData = (function () {
     saveProjects: saveProjects,
     loadSaves: loadSaves,
     saveSaves: saveSaves,
+    loadRequests: loadRequests,
+    saveRequests: saveRequests,
     getCurrentUserId: getCurrentUserId,
     setCurrentUserId: setCurrentUserId,
     resetAllData: resetAllData,
+    hashPassword: hashPassword,
     LIMITS: {
       maxPhotosPerProject: 20,
       maxPhotoSizeMB: 5,

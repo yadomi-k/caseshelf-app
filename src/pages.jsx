@@ -12,17 +12,224 @@ window.AppPages = (function () {
   // ====================================================================
   // Login
   // ====================================================================
+  var MIN_PASSWORD_LENGTH = 8;
+  function validateNewPassword(pw) {
+    if (!pw || pw.length < MIN_PASSWORD_LENGTH) {
+      return "パスワードは" + MIN_PASSWORD_LENGTH + "文字以上で入力してください。";
+    }
+    return null;
+  }
+
+  // Salesforceのロゴではなく、雲の形の簡単なマーク
+  function SalesforceMark() {
+    return h(
+      "svg",
+      { width: 22, height: 16, viewBox: "0 0 22 16", "aria-hidden": "true", className: "sf-mark" },
+      h("path", {
+        fill: "currentColor",
+        d: "M9 2.2A4.2 4.2 0 0 1 12.2.8c1.6 0 3 .9 3.7 2.2a5 5 0 0 1 2-.4C20.2 2.6 22 4.5 22 6.9s-1.8 4.3-4.1 4.3h-.8a3.5 3.5 0 0 1-4.6 1.6A4 4 0 0 1 5 12.4a3.6 3.6 0 0 1-1 .1C1.8 12.5 0 10.6 0 8.3a4.2 4.2 0 0 1 2.4-3.8A4.3 4.3 0 0 1 9 2.2z",
+      })
+    );
+  }
+
+  // 依頼メールの内容（件名・本文）。Outlookで受け取って処理しやすいよう、項目を決まった形で書く。
+  function requestMailHref(profile) {
+    var to = (window.AppConfig && window.AppConfig.accountRequestEmail) || "";
+    var now = new Date();
+    var stamp =
+      now.getFullYear() + "/" + (now.getMonth() + 1) + "/" + now.getDate() + " " +
+      now.getHours() + ":" + String(now.getMinutes()).padStart(2, "0");
+    var subject = "【CaseShelf】アカウント作成依頼";
+    var body = [
+      "CaseShelfのアカウント作成をお願いします。",
+      "",
+      "依頼内容: CaseShelfアカウント作成",
+      "氏名: " + (profile.name || ""),
+      "メールアドレス: " + profile.email,
+      "依頼日時: " + stamp,
+      "",
+      "※CaseShelfのログイン画面から送信された依頼です（Salesforceで本人確認済み）。",
+    ].join("\n");
+    return { to: to, href: "mailto:" + to + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body) };
+  }
+
+  function RequestAccountCard(props) {
+    var p = props.profile;
+    var mail = requestMailHref(p);
+    var done = !!props.result;
+    return h(
+      "div",
+      { className: "login-card request-card" },
+      h("h2", null, done ? "利用登録を依頼しました" : "CaseShelfの利用登録がまだです"),
+      h(
+        "div",
+        { className: "request-who" },
+        h("div", { className: "request-name" }, p.name || "（名前なし）"),
+        h("div", { className: "request-email" }, p.email)
+      ),
+      !done &&
+        h(
+          React.Fragment,
+          null,
+          h(
+            "p",
+            { className: "request-text" },
+            "Salesforceでの本人確認はできました。CaseShelfを使うには、管理者による利用登録が必要です。"
+          ),
+          props.error && h("div", { className: "login-error", role: "alert" }, props.error),
+          h("button", { type: "button", className: "btn primary block", onClick: props.onRequest }, "管理者に利用登録を依頼する")
+        ),
+      done &&
+        h(
+          React.Fragment,
+          null,
+          h(
+            "p",
+            { className: "request-text" },
+            props.result === "duplicate"
+              ? "このアカウントの依頼は既に受け付けています。管理者が登録するまでお待ちください。"
+              : "依頼を受け付けました。管理者が登録すると、「Salesforceでログイン」から使えるようになります。"
+          ),
+          mail.to &&
+            h(
+              "div",
+              { className: "request-mail" },
+              h("p", null, "管理者に確実に届くよう、依頼メールも送ってください。"),
+              h("a", { className: "btn block", href: mail.href }, "依頼メールを作成する"),
+              h("p", { className: "request-mail-to" }, "宛先: ", h("span", { className: "selectable" }, mail.to))
+            )
+        ),
+      h(
+        "button",
+        { type: "button", className: "link-button request-back", onClick: props.onBack },
+        "ログイン画面に戻る"
+      )
+    );
+  }
+
   function LoginPage(props) {
     var store = props.store;
-    var users = store.users;
+    var _id = useState("");
+    var loginId = _id[0],
+      setLoginId = _id[1];
+    var _pw = useState("");
+    var password = _pw[0],
+      setPassword = _pw[1];
+    var _err = useState(null);
+    var error = _err[0],
+      setError = _err[1];
+    var _busy = useState(false);
+    var busy = _busy[0],
+      setBusy = _busy[1];
+    var _show = useState(false);
+    var showPw = _show[0],
+      setShowPw = _show[1];
+    var _sf = useState(false);
+    var sfBusy = _sf[0],
+      setSfBusy = _sf[1];
+    var _nr = useState(null); // Salesforceで本人確認できたが未登録の人
+    var notRegistered = _nr[0],
+      setNotRegistered = _nr[1];
+    var _rq = useState(null); // 依頼の結果
+    var requestResult = _rq[0],
+      setRequestResult = _rq[1];
+    var _fb = useState(false);
+    var showFallback = _fb[0],
+      setShowFallback = _fb[1];
 
-    function pick(user) {
-      if (user.status === "suspended") {
-        store.toast("このアカウントは利用停止されています。管理者にお問い合わせください。", "error");
+    // Salesforceから戻ってきた場合の処理
+    useEffect(function () {
+      var cancelled = false;
+      var pending = AppSSO.consumeRedirect();
+      pending.then(
+        function (profile) {
+          if (cancelled || !profile) return;
+          setSfBusy(true);
+          var res = store.loginWithSalesforce(profile);
+          setSfBusy(false);
+          if (!res.ok) {
+            if (res.error === "notRegistered") {
+              setNotRegistered(res.profile);
+              return;
+            }
+            setError(res.error);
+            return;
+          }
+          props.route.navigate("/feed", { replace: true });
+        },
+        function (e) {
+          if (!cancelled) setError(e.message);
+        }
+      );
+      // 通信中は「確認中」を表示する
+      if (new URLSearchParams(window.location.search).get("code")) setSfBusy(true);
+      return function () {
+        cancelled = true;
+      };
+    }, []);
+
+    function startSalesforce() {
+      setError(null);
+      setSfBusy(true);
+      AppSSO.startLogin().catch(function (e) {
+        setSfBusy(false);
+        setError(e.message);
+      });
+    }
+
+    function submit(e) {
+      e.preventDefault();
+      if (!loginId.trim() || !password) {
+        setError("ユーザIDとパスワードを入力してください。");
         return;
       }
-      store.login(user.id);
-      props.route.navigate("/feed", { replace: true });
+      setBusy(true);
+      setError(null);
+      store.authenticate(loginId, password).then(function (res) {
+        setBusy(false);
+        if (!res.ok) {
+          setError(res.error);
+          setPassword("");
+          return;
+        }
+        props.route.navigate("/feed", { replace: true });
+      });
+    }
+
+    function sendRequest() {
+      var res = store.requestAccount(notRegistered);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setRequestResult(res.duplicate ? "duplicate" : "created");
+    }
+
+    var logo = h(
+      "div",
+      { className: "login-logo" },
+      h(C.Logo, { size: 40 }),
+      h("div", { className: "name" }, "CaseShelf"),
+      h("div", { className: "tagline" }, "社内事例写真を、探しやすく。")
+    );
+
+    if (notRegistered) {
+      return h(
+        "div",
+        { className: "login-screen" },
+        logo,
+        h(RequestAccountCard, {
+          profile: notRegistered,
+          result: requestResult,
+          error: error,
+          onRequest: sendRequest,
+          onBack: function () {
+            setNotRegistered(null);
+            setRequestResult(null);
+            setError(null);
+          },
+        })
+      );
     }
 
     return h(
@@ -38,37 +245,109 @@ window.AppPages = (function () {
       h(
         "div",
         { className: "login-card" },
-        h("h2", null, "ログインするアカウントを選択（試作品）"),
-        users.map(function (u) {
-          return h(
-            "button",
-            {
-              key: u.id,
-              type: "button",
-              className: cx("user-pick-row", u.status === "suspended" && "suspended"),
-              onClick: function () {
-                pick(u);
-              },
-            },
-            h(C.Avatar, { user: u, size: "md" }),
+        h("h2", null, "ログイン"),
+        h(
+          "button",
+          { type: "button", className: "btn block sf-login", onClick: startSalesforce, disabled: sfBusy || busy },
+          h(SalesforceMark, null),
+          sfBusy ? "Salesforceで確認中..." : "Salesforceでログイン"
+        ),
+        h("p", { className: "login-help" }, "会社のSalesforceアカウントでログインします。"),
+        !showFallback && error && h("div", { className: "login-error login-error-top", role: "alert" }, error)
+      ),
+      showFallback
+        ? h(
+            "form",
+            { className: "login-card fallback-card", onSubmit: submit, noValidate: true },
+            h("h2", null, "管理者の緊急用ログイン"),
             h(
-              "div",
-              { className: "user-pick-info" },
-              h("div", { className: "name" }, u.displayName),
-              h("div", { className: "meta" }, u.email)
+              "p",
+              { className: "fallback-note" },
+              "Salesforceにログインできないときに、管理者だけが使えます。"
             ),
             h(
-              "span",
-              { className: cx("role-badge", u.status === "suspended" && "suspended") },
-              u.status === "suspended" ? "利用停止中" : u.role === "admin" ? "管理者" : "利用者"
+              "div",
+              { className: "field" },
+              h("label", { htmlFor: "login-id" }, "ユーザID（メールアドレス）"),
+              h("input", {
+                id: "login-id",
+                className: "text-input",
+                autoComplete: "username",
+                autoCapitalize: "none",
+                value: loginId,
+                onChange: function (e) {
+                  setLoginId(e.target.value);
+                },
+                autoFocus: true,
+              })
+            ),
+            h(
+              "div",
+              { className: "field" },
+              h("label", { htmlFor: "login-pw" }, "緊急用パスワード"),
+              h(
+                "div",
+                { className: "password-row" },
+                h("input", {
+                  id: "login-pw",
+                  className: "text-input",
+                  type: showPw ? "text" : "password",
+                  autoComplete: "current-password",
+                  value: password,
+                  onChange: function (e) {
+                    setPassword(e.target.value);
+                  },
+                }),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "btn ghost sm",
+                    onClick: function () {
+                      setShowPw(!showPw);
+                    },
+                  },
+                  showPw ? "隠す" : "表示"
+                )
+              )
+            ),
+            error && h("div", { className: "login-error", role: "alert" }, error),
+            h(
+              "button",
+              { className: "btn primary block", type: "submit", disabled: busy },
+              busy ? "確認中..." : "ログイン"
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "link-button",
+                onClick: function () {
+                  setShowFallback(false);
+                  setError(null);
+                  setPassword("");
+                },
+              },
+              "閉じる"
             )
-          );
-        })
-      ),
+          )
+        : h(
+            "button",
+            {
+              type: "button",
+              id: "open-fallback",
+              className: "link-button",
+              onClick: function () {
+                setShowFallback(true);
+                setError(null);
+              },
+            },
+            "管理者の緊急用ログイン"
+          ),
       h(
         "p",
         { className: "login-note" },
-        "試作品のため、実際のパスワード認証・アクセス制御は行っていません。本番環境では、管理者による招待とメール認証によるログインを予定しています。「利用停止中」のアカウントを選ぶと、本番で想定しているアクセス拒否の挙動を確認できます。"
+        "CaseShelfを使うには、管理者による利用者登録が必要です。※試作品のため、データはこの端末のブラウザ内にのみ保存されます。"
       )
     );
   }
@@ -1057,7 +1336,7 @@ window.AppPages = (function () {
                   "編集"
                 )
               ),
-          h("div", { className: "email" }, "社内アカウント（他の利用者には表示されません）")
+          h("div", { className: "email" }, user.email)
         )
       ),
       h(
@@ -1066,6 +1345,7 @@ window.AppPages = (function () {
         h("div", null, h("b", null, myProjects.length), " 件の投稿"),
         h("div", null, h("b", null, savedCount), " 件の保存")
       ),
+      user.role === "admin" && h(PasswordChangeForm, { store: store }),
       h(C.PhotoGrid, {
         projects: myProjects,
         emptyMessage: "まだ案件を投稿していません。",
@@ -1073,9 +1353,224 @@ window.AppPages = (function () {
     );
   }
 
+  function PasswordChangeForm(props) {
+    var store = props.store;
+    var _open = useState(false);
+    var open = _open[0],
+      setOpen = _open[1];
+    var _cur = useState("");
+    var cur = _cur[0],
+      setCur = _cur[1];
+    var _next = useState("");
+    var next = _next[0],
+      setNext = _next[1];
+    var _conf = useState("");
+    var conf = _conf[0],
+      setConf = _conf[1];
+    var _err = useState(null);
+    var error = _err[0],
+      setError = _err[1];
+
+    function reset() {
+      setCur("");
+      setNext("");
+      setConf("");
+      setError(null);
+    }
+
+    function submit(e) {
+      e.preventDefault();
+      var pwErr = validateNewPassword(next);
+      var hasPw = !!store.currentUser.passwordHash;
+      if (hasPw && !cur) return setError("現在のパスワードを入力してください。");
+      if (pwErr) return setError(pwErr);
+      if (next !== conf) return setError("新しいパスワード（確認）が一致しません。");
+      if (next === cur) return setError("現在と異なるパスワードを入力してください。");
+      store.changePassword(cur, next).then(function (res) {
+        if (!res.ok) return setError(res.error);
+        reset();
+        setOpen(false);
+        store.toast("緊急用パスワードを保存しました。", "success");
+      });
+    }
+
+    if (!open) {
+      return h(
+        "div",
+        { className: "password-section" },
+        h(
+          "button",
+          {
+            type: "button",
+            className: "btn sm",
+            onClick: function () {
+              setOpen(true);
+            },
+          },
+          store.currentUser.passwordHash ? "緊急用パスワードを変更" : "緊急用パスワードを設定"
+        ),
+        h(
+          "span",
+          { className: "form-hint", style: { marginLeft: 8 } },
+          "Salesforceにログインできないときの管理者用"
+        )
+      );
+    }
+
+    function pwField(id, label, value, setter, ac) {
+      return h(
+        "div",
+        { className: "field" },
+        h("label", { htmlFor: id }, label),
+        h("input", {
+          id: id,
+          className: "text-input",
+          type: "password",
+          autoComplete: ac,
+          value: value,
+          onChange: function (e) {
+            setter(e.target.value);
+          },
+        })
+      );
+    }
+
+    return h(
+      "form",
+      { className: "password-section password-form", onSubmit: submit, noValidate: true },
+      h("h3", null, "緊急用パスワード"),
+      h("p", { className: "fallback-note" }, "Salesforceにログインできないときに、ログイン画面の「管理者の緊急用ログイン」で使います。"),
+      store.currentUser.passwordHash && pwField("pw-cur", "現在のパスワード", cur, setCur, "current-password"),
+      pwField("pw-new", "新しいパスワード（8文字以上）", next, setNext, "new-password"),
+      pwField("pw-conf", "新しいパスワード（確認）", conf, setConf, "new-password"),
+      error && h("div", { className: "login-error", role: "alert" }, error),
+      h(
+        "div",
+        { style: { display: "flex", gap: 8 } },
+        h("button", { className: "btn primary sm", type: "submit" }, "変更する"),
+        h(
+          "button",
+          {
+            className: "btn ghost sm",
+            type: "button",
+            onClick: function () {
+              reset();
+              setOpen(false);
+            },
+          },
+          "キャンセル"
+        )
+      )
+    );
+  }
+
   // ====================================================================
   // 管理者画面
   // ====================================================================
+  function formatDateTime(iso) {
+    var d = new Date(iso);
+    return (
+      d.getFullYear() + "/" + (d.getMonth() + 1) + "/" + d.getDate() + " " +
+      d.getHours() + ":" + String(d.getMinutes()).padStart(2, "0")
+    );
+  }
+
+  function RequestRow(props) {
+    var store = props.store;
+    var r = props.request;
+    var _role = useState("member");
+    var role = _role[0],
+      setRole = _role[1];
+    var selectId = "req-role-" + r.id;
+    return h(
+      "tr",
+      null,
+      h("td", null, r.name || "（名前なし）"),
+      h("td", null, r.email),
+      h("td", { className: "num" }, formatDateTime(r.requestedAt)),
+      h(
+        "td",
+        null,
+        h(
+          "div",
+          { className: "request-actions" },
+          h("label", { htmlFor: selectId, className: "visually-hidden" }, "権限"),
+          h(
+            "select",
+            {
+              id: selectId,
+              className: "text-input sm-select",
+              value: role,
+              onChange: function (e) {
+                setRole(e.target.value);
+              },
+            },
+            h("option", { value: "member" }, "利用者"),
+            h("option", { value: "admin" }, "管理者")
+          ),
+          h(
+            "button",
+            {
+              className: "btn primary sm",
+              onClick: function () {
+                store.admin.approveRequest(r.id, role).then(function (res) {
+                  store.toast(
+                    res.ok ? "「" + r.email + "」を登録しました。Salesforceでログインできるようになります。" : res.error,
+                    res.ok ? "success" : "error"
+                  );
+                });
+              },
+            },
+            "登録する"
+          ),
+          h(
+            "button",
+            {
+              className: "btn sm",
+              onClick: function () {
+                store.admin.declineRequest(r.id);
+                store.toast("依頼を見送りにしました。", "success");
+              },
+            },
+            "見送る"
+          )
+        )
+      )
+    );
+  }
+
+  function RequestList(props) {
+    var store = props.store;
+    var list = store.pendingRequests;
+    return h(
+      "section",
+      { className: "request-section" },
+      h("h2", null, "利用登録の依頼", list.length ? h("span", { className: "nav-badge" }, list.length) : null),
+      list.length === 0
+        ? h("p", { className: "form-hint" }, "未対応の依頼はありません。")
+        : h(
+            "div",
+            { className: "table-scroll" },
+            h(
+              "table",
+              { className: "admin-table" },
+              h(
+                "thead",
+                null,
+                h("tr", null, h("th", null, "名前"), h("th", null, "メール"), h("th", null, "依頼日時"), h("th", null, "操作"))
+              ),
+              h(
+                "tbody",
+                null,
+                list.map(function (r) {
+                  return h(RequestRow, { key: r.id, store: store, request: r });
+                })
+              )
+            )
+          )
+    );
+  }
+
   function AdminPage(props) {
     var store = props.store;
     var _inviteEmail = useState("");
@@ -1084,6 +1579,15 @@ window.AppPages = (function () {
     var _inviteName = useState("");
     var inviteName = _inviteName[0],
       setInviteName = _inviteName[1];
+    var _resetTarget = useState(null);
+    var resetTarget = _resetTarget[0],
+      setResetTarget = _resetTarget[1];
+    var _resetPw = useState("");
+    var resetPw = _resetPw[0],
+      setResetPw = _resetPw[1];
+    var _inviteRole = useState("member");
+    var inviteRole = _inviteRole[0],
+      setInviteRole = _inviteRole[1];
     var _confirmTarget = useState(null);
     var confirmTarget = _confirmTarget[0],
       setConfirmTarget = _confirmTarget[1];
@@ -1106,17 +1610,42 @@ window.AppPages = (function () {
 
     function handleInvite(e) {
       e.preventDefault();
-      if (!inviteEmail.trim() || !inviteName.trim()) {
+      var email = inviteEmail.trim();
+      if (!email || !inviteName.trim()) {
         store.toast("メールアドレスと表示名を入力してください。", "error");
         return;
       }
-      store.admin.inviteUser({ email: inviteEmail.trim(), displayName: inviteName.trim() });
-      setInviteEmail("");
-      setInviteName("");
-      store.toast(
-        "利用者を招待しました（試作品のため実際のメール送信は行われません）。",
-        "success"
-      );
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        store.toast("メールアドレスの形式が正しくありません。", "error");
+        return;
+      }
+      store.admin
+        .inviteUser({ email: email, displayName: inviteName.trim(), role: inviteRole })
+        .then(function (res) {
+          if (!res.ok) {
+            store.toast(res.error, "error");
+            return;
+          }
+          setInviteEmail("");
+          setInviteName("");
+          setInviteRole("member");
+          store.toast("「" + email + "」を追加しました。Salesforceでログインできるようになります。", "success");
+        });
+    }
+
+    function handleResetPassword(e) {
+      e.preventDefault();
+      var pwErr = validateNewPassword(resetPw);
+      if (pwErr) {
+        store.toast(pwErr, "error");
+        return;
+      }
+      var target = resetTarget;
+      store.admin.resetPassword(target.id, resetPw).then(function () {
+        setResetTarget(null);
+        setResetPw("");
+        store.toast("「" + target.displayName + "」のパスワードを再設定しました。新しいパスワードを本人に伝えてください。", "success");
+      });
     }
 
     function handleDeleteTag(tag) {
@@ -1128,15 +1657,17 @@ window.AppPages = (function () {
     return h(
       "div",
       { className: "admin-section" },
-      h(C.ProtoBanner, null, "管理者画面（試作品）: 利用者招待は実際のメール送信を行いません。すべてこの端末内のデータに対する操作です。"),
+      h(C.ProtoBanner, null, "管理者画面（試作品）: 利用者の追加は実際のメール送信を行いません。すべてこの端末内のデータに対する操作です。"),
 
-      h("h2", null, "利用者の招待・停止"),
+      h(RequestList, { store: store }),
+
+      h("h2", null, "利用者の登録・停止"),
       h(
         "form",
         { className: "inline-form", onSubmit: handleInvite },
         h("input", {
           className: "text-input",
-          placeholder: "メールアドレス",
+          placeholder: "メールアドレス（Salesforceと同じ）",
           value: inviteEmail,
           onChange: function (e) {
             setInviteEmail(e.target.value);
@@ -1150,8 +1681,56 @@ window.AppPages = (function () {
             setInviteName(e.target.value);
           },
         }),
-        h("button", { className: "btn primary", type: "submit" }, "招待する")
+        h(
+          "select",
+          {
+            className: "text-input",
+            value: inviteRole,
+            onChange: function (e) {
+              setInviteRole(e.target.value);
+            },
+          },
+          h("option", { value: "member" }, "利用者"),
+          h("option", { value: "admin" }, "管理者")
+        ),
+        h("button", { className: "btn primary", type: "submit" }, "登録する"),
+        h(
+          "p",
+          { className: "form-hint" },
+          "メールアドレスは、その人がSalesforceに登録しているメールアドレスと同じものを入力してください。ログインはSalesforceで行うため、パスワードは不要です。"
+        )
       ),
+      resetTarget &&
+        h(
+          "form",
+          { className: "inline-form reset-form", onSubmit: handleResetPassword },
+          h("label", { htmlFor: "reset-pw" }, "「" + resetTarget.displayName + "」の新しい緊急用パスワード"),
+          h("input", {
+            id: "reset-pw",
+            className: "text-input",
+            type: "text",
+            placeholder: "8文字以上",
+            autoComplete: "new-password",
+            value: resetPw,
+            autoFocus: true,
+            onChange: function (e) {
+              setResetPw(e.target.value);
+            },
+          }),
+          h("button", { className: "btn primary", type: "submit" }, "再設定する"),
+          h(
+            "button",
+            {
+              className: "btn ghost",
+              type: "button",
+              onClick: function () {
+                setResetTarget(null);
+                setResetPw("");
+              },
+            },
+            "キャンセル"
+          )
+        ),
       h(
         "table",
         { className: "admin-table" },
@@ -1202,7 +1781,21 @@ window.AppPages = (function () {
                     },
                   },
                   u.status === "active" ? "停止する" : "復帰させる"
-                )
+                ),
+                u.role === "admin" && " ",
+                u.role === "admin" &&
+                  h(
+                    "button",
+                    {
+                      className: "btn sm",
+                      title: "管理者の緊急用パスワードを再設定します",
+                      onClick: function () {
+                        setResetTarget(u);
+                        setResetPw("");
+                      },
+                    },
+                    "緊急用PW"
+                  )
               )
             );
           })

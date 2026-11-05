@@ -105,6 +105,9 @@
     var _saves = useState(AppData.loadSaves);
     var saves = _saves[0],
       setSaves = _saves[1];
+    var _requests = useState(AppData.loadRequests);
+    var requests = _requests[0],
+      setRequests = _requests[1];
     var _currentUserId = useState(AppData.getCurrentUserId);
     var currentUserId = _currentUserId[0],
       setCurrentUserId = _currentUserId[1];
@@ -133,6 +136,38 @@
       },
       [saves]
     );
+    useEffect(
+      function () {
+        AppData.saveRequests(requests);
+      },
+      [requests]
+    );
+
+    // 未登録の人（Salesforceでの本人確認済み）から、利用登録を依頼する。
+    // 同じメールアドレスの未対応の依頼がある場合は、新しく作らない。
+    function requestAccount(profile) {
+      var key = String(profile.email || "").trim().toLowerCase();
+      if (!key) return { ok: false, error: "Salesforceのメールアドレスを取得できませんでした。" };
+      var dup = requests.some(function (r) {
+        return r.status === "pending" && r.email.toLowerCase() === key;
+      });
+      if (dup) return { ok: true, duplicate: true };
+      var req = {
+        id: AppData.uid("req"),
+        email: profile.email,
+        name: profile.name || "",
+        requestedAt: new Date().toISOString(),
+        status: "pending",
+      };
+      setRequests(function (prev) {
+        return prev.concat([req]);
+      });
+      return { ok: true, request: req };
+    }
+
+    var pendingRequests = requests.filter(function (r) {
+      return r.status === "pending";
+    });
 
     var currentUser =
       users.find(function (u) {
@@ -147,6 +182,84 @@
     function logout() {
       AppData.setCurrentUserId(null);
       setCurrentUserId(null);
+    }
+
+    function findByLoginId(loginId) {
+      var key = String(loginId || "").trim().toLowerCase();
+      return (
+        users.find(function (u) {
+          return (u.loginId || "").toLowerCase() === key || (u.email || "").toLowerCase() === key;
+        }) || null
+      );
+    }
+
+    // 管理者の緊急用ログイン（ユーザID・パスワード）。結果は Promise で { ok, error } を返す。
+    // 通常のログインはSalesforceで行う。パスワードでログインできるのは管理者だけ。
+    // IDが存在しない場合とパスワード違いの場合は、同じメッセージを返す
+    // （どのIDが存在するかを推測されにくくするため）。
+    function authenticate(loginId, password) {
+      var user = findByLoginId(loginId);
+      var badCred = { ok: false, error: "ユーザIDまたはパスワードが正しくありません。" };
+      if (!user || !user.passwordHash) return Promise.resolve(badCred);
+      return AppData.hashPassword(user.id, password).then(
+        function (hash) {
+          if (hash !== user.passwordHash) return badCred;
+          if (user.role !== "admin") {
+            return { ok: false, error: "パスワードでのログインは管理者のみ使えます。「Salesforceでログイン」からログインしてください。" };
+          }
+          if (user.status === "suspended") {
+            return { ok: false, error: "このアカウントは利用停止されています。管理者にお問い合わせください。" };
+          }
+          login(user.id);
+          return { ok: true };
+        },
+        function (e) {
+          return { ok: false, error: e.message };
+        }
+      );
+    }
+
+    // Salesforceでログインした人を、メールアドレスでこのアプリの利用者と照合してログインする。
+    // Salesforceのアカウントがあっても、このアプリに登録されていない人はログインできない。
+    function loginWithSalesforce(profile) {
+      var key = String(profile.email || "").trim().toLowerCase();
+      var user =
+        key &&
+        users.find(function (u) {
+          return (u.email || "").toLowerCase() === key;
+        });
+      if (!user) {
+        return {
+          ok: false,
+          error: "notRegistered",
+          profile: profile,
+        };
+      }
+      if (user.status === "suspended") {
+        return { ok: false, error: "このアカウントは利用停止されています。管理者にお問い合わせください。" };
+      }
+      login(user.id);
+      return { ok: true };
+    }
+
+    // ログイン中の管理者の緊急用パスワードを設定・変更する。
+    // まだ設定していない場合は、現在のパスワードなしで設定できる。
+    function changePassword(currentPassword, newPassword) {
+      if (!currentUser) return Promise.resolve({ ok: false, error: "ログインしていません。" });
+      var me = currentUser;
+      if (me.role !== "admin") return Promise.resolve({ ok: false, error: "緊急用パスワードは管理者のみ設定できます。" });
+      var check = me.passwordHash ? AppData.hashPassword(me.id, currentPassword) : Promise.resolve(null);
+      return check.then(function (hash) {
+        if (me.passwordHash && hash !== me.passwordHash) return { ok: false, error: "現在のパスワードが正しくありません。" };
+        return AppData.hashPassword(me.id, newPassword).then(function (newHash) {
+          setUsers(function (prev) {
+            return prev.map(function (u) {
+              return u.id === me.id ? Object.assign({}, u, { passwordHash: newHash }) : u;
+            });
+          });
+          return { ok: true };
+        });
+      });
     }
 
     function addProject(payload) {
@@ -235,19 +348,61 @@
     })();
 
     var admin = {
+      // 利用者を追加する。Salesforceでログインするため、メールアドレス（=Salesforceのメールアドレス）で登録する。
+      // Promise で { ok, error } を返す。
       inviteUser: function (data) {
+        if (findByLoginId(data.email)) {
+          return Promise.resolve({ ok: false, error: "そのメールアドレスは既に登録されています。" });
+        }
         var user = {
           id: AppData.uid("u"),
+          loginId: data.email,
           email: data.email,
           displayName: data.displayName,
-          role: "member",
+          role: data.role === "admin" ? "admin" : "member",
           status: "active",
           avatarImage: null,
         };
         setUsers(function (prev) {
           return prev.concat([user]);
         });
-        return user;
+        return Promise.resolve({ ok: true, user: user });
+      },
+      // 管理者がパスワードを再設定する（利用者がパスワードを忘れた場合など）。
+      resetPassword: function (userId, newPassword) {
+        return AppData.hashPassword(userId, newPassword).then(function (hash) {
+          setUsers(function (prev) {
+            return prev.map(function (u) {
+              return u.id === userId ? Object.assign({}, u, { passwordHash: hash }) : u;
+            });
+          });
+          return { ok: true };
+        });
+      },
+      // 依頼を承認して利用者として登録する
+      approveRequest: function (reqId, role) {
+        var req = requests.find(function (r) {
+          return r.id === reqId;
+        });
+        if (!req) return Promise.resolve({ ok: false, error: "依頼が見つかりません。" });
+        return admin
+          .inviteUser({ email: req.email, displayName: req.name || req.email, role: role })
+          .then(function (res) {
+            if (!res.ok) return res;
+            setRequests(function (prev) {
+              return prev.map(function (r) {
+                return r.id === reqId ? Object.assign({}, r, { status: "approved", handledAt: new Date().toISOString() }) : r;
+              });
+            });
+            return res;
+          });
+      },
+      declineRequest: function (reqId) {
+        setRequests(function (prev) {
+          return prev.map(function (r) {
+            return r.id === reqId ? Object.assign({}, r, { status: "declined", handledAt: new Date().toISOString() }) : r;
+          });
+        });
       },
       setUserStatus: function (userId, status) {
         setUsers(function (prev) {
@@ -276,7 +431,11 @@
       saves: saves,
       currentUser: currentUser,
       isAdmin: isAdmin,
-      login: login,
+      authenticate: authenticate,
+      loginWithSalesforce: loginWithSalesforce,
+      requestAccount: requestAccount,
+      pendingRequests: pendingRequests,
+      changePassword: changePassword,
       logout: logout,
       addProject: addProject,
       updateProject: updateProject,
@@ -402,6 +561,7 @@
         onBack: showBack ? handleBack : null,
         active: activeNavKey,
         isAdmin: store.isAdmin,
+        pendingCount: store.isAdmin ? store.pendingRequests.length : 0,
         right: h(
           "div",
           { style: { display: "flex", alignItems: "center", gap: 8 } },

@@ -85,7 +85,7 @@ window.AppComponents = (function () {
     var isAdmin = props.isAdmin;
     var items = NAV_ITEMS.slice();
     if (isAdmin) {
-      items = items.concat([{ key: "admin", label: "管理者", path: "#/admin" }]);
+      items = items.concat([{ key: "admin", label: "管理者", path: "#/admin", badge: props.pendingCount }]);
     }
     return h(
       "nav",
@@ -98,7 +98,8 @@ window.AppComponents = (function () {
             href: item.path,
             className: cx(active === item.key && "active"),
           },
-          item.label
+          item.label,
+          item.badge ? h("span", { className: "nav-badge", "aria-label": "未対応の依頼 " + item.badge + "件" }, item.badge) : null
         );
       })
     );
@@ -126,7 +127,7 @@ window.AppComponents = (function () {
             "CaseShelf"
           ),
       props.title ? h("div", { className: "title" }, props.title) : h("div", { className: "topbar-spacer" }),
-      h(DesktopNav, { active: props.active, isAdmin: props.isAdmin }),
+      h(DesktopNav, { active: props.active, isAdmin: props.isAdmin, pendingCount: props.pendingCount }),
       props.right || null
     );
   }
