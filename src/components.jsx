@@ -9,14 +9,14 @@ window.AppComponents = (function () {
     return h(
       "svg",
       { width: size, height: size, viewBox: "0 0 24 24", fill: "none" },
-      h("rect", { x: 2, y: 2, width: 13, height: 13, rx: 3, fill: "#2f6f4f" }),
+      h("rect", { x: 2, y: 2, width: 13, height: 13, rx: 3, fill: "#1d5fc4" }),
       h("rect", {
         x: 9,
         y: 9,
         width: 13,
         height: 13,
         rx: 3,
-        fill: "#9bcdb3",
+        fill: "#9dc1f2",
         stroke: "#fff",
         strokeWidth: 1.5,
       })
@@ -88,6 +88,102 @@ window.AppComponents = (function () {
     );
   }
 
+  // 写真のスライド表示（スマートフォンはスワイプ、PCは左右の矢印）。案件詳細とタイムラインで使う
+  // props: photos, alt, className, resetKey（変わったら1枚目に戻す）
+  function PhotoCarousel(props) {
+    var photos = props.photos || [];
+    var total = photos.length;
+    var _idx = React.useState(0);
+    var idx = _idx[0],
+      setIdx = _idx[1];
+    var _drag = React.useState(0);
+    var dragX = _drag[0],
+      setDragX = _drag[1];
+    var touchStartX = React.useRef(null);
+    var touchDeltaX = React.useRef(0);
+
+    React.useEffect(
+      function () {
+        setIdx(0);
+      },
+      [props.resetKey]
+    );
+
+    function go(delta) {
+      setIdx(function (i) {
+        return AppUtils.clamp(i + delta, 0, total - 1);
+      });
+    }
+    function onTouchStart(e) {
+      touchStartX.current = e.touches[0].clientX;
+      touchDeltaX.current = 0;
+    }
+    function onTouchMove(e) {
+      if (touchStartX.current == null) return;
+      touchDeltaX.current = e.touches[0].clientX - touchStartX.current;
+      setDragX(touchDeltaX.current);
+    }
+    function onTouchEnd() {
+      var d = touchDeltaX.current;
+      if (d < -50 && idx < total - 1) setIdx(idx + 1);
+      else if (d > 50 && idx > 0) setIdx(idx - 1);
+      touchStartX.current = null;
+      touchDeltaX.current = 0;
+      setDragX(0);
+    }
+
+    var trackStyle = {
+      transform: "translateX(calc(-" + idx * 100 + "% + " + dragX + "px))",
+      transition: dragX ? "none" : undefined,
+    };
+
+    return h(
+      "div",
+      {
+        className: cx("detail-carousel", props.className),
+        onTouchStart: onTouchStart,
+        onTouchMove: onTouchMove,
+        onTouchEnd: onTouchEnd,
+      },
+      h(
+        "div",
+        { className: "track", style: trackStyle },
+        photos.map(function (ph, i) {
+          return h(
+            "div",
+            { className: "slide", key: ph.id },
+            // 今の写真と前後の写真だけ読み込む
+            Math.abs(i - idx) <= 1 ? h(Photo, { photo: ph, alt: props.alt, loading: props.loading }) : null
+          );
+        })
+      ),
+      idx > 0
+        ? h(
+            "button",
+            { type: "button", className: "nav-arrow left", onClick: function () { go(-1); }, "aria-label": "前の写真" },
+            "‹"
+          )
+        : null,
+      idx < total - 1
+        ? h(
+            "button",
+            { type: "button", className: "nav-arrow right", onClick: function () { go(1); }, "aria-label": "次の写真" },
+            "›"
+          )
+        : null,
+      total > 1 ? h("div", { className: "counter" }, idx + 1 + " / " + total) : null,
+      total > 1
+        ? h(
+            "div",
+            { className: "carousel-dots", "aria-hidden": true },
+            photos.map(function (ph, i) {
+              return h("span", { key: ph.id, className: cx("dot", i === idx && "active") });
+            })
+          )
+        : null
+    );
+  }
+
   function ProtoBanner(props) {
     return h(
       "div",
@@ -99,6 +195,7 @@ window.AppComponents = (function () {
 
   var NAV_ITEMS = [
     { key: "feed", label: "一覧", path: "#/feed", icon: "⊞" },
+    { key: "timeline", label: "タイムライン", path: "#/timeline", icon: "☰" },
     { key: "new", label: "投稿", path: "#/new", icon: "➕" },
     { key: "saved", label: "保存", path: "#/saved", icon: "★" },
     { key: "profile", label: "マイページ", path: "#/profile", icon: "●" },
@@ -699,6 +796,7 @@ window.AppComponents = (function () {
     TopBar: TopBar,
     Chip: Chip,
     MultiBadge: MultiBadge,
+    PhotoCarousel: PhotoCarousel,
     ReactionBar: ReactionBar,
     PhotoGrid: PhotoGrid,
     Toast: Toast,
