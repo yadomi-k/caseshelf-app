@@ -207,9 +207,20 @@
                   AppSF.removeReaction(rc.id).catch(function () {});
                 }
               });
+              // リアクションは1投稿につき1人1つまで。以前の版で自分が複数付けていた投稿は、いちばん新しいものだけ残す
+              var myLatest = {};
+              r[4].forEach(function (rc) {
+                if (rc.postId && rc.createdById && rc.createdById === profile.sfUserId) myLatest[rc.postId] = rc.id;
+              });
+              var extra = r[4].filter(function (rc) {
+                return rc.postId && rc.createdById && rc.createdById === profile.sfUserId && myLatest[rc.postId] !== rc.id;
+              });
+              extra.forEach(function (rc) {
+                AppSF.removeReaction(rc.id).catch(function () {});
+              });
               setReactions(
                 r[4].filter(function (rc) {
-                  return !!rc.postId;
+                  return !!rc.postId && extra.indexOf(rc) === -1;
                 })
               );
               setReactionsAvailable(true);
@@ -506,10 +517,18 @@
         users.forEach(function (u) {
           byEmail[lower(u.email)] = u;
         });
+        // リアクションは1投稿につき1人1つまで。以前の版で複数付けていた場合は、いちばん新しいものだけを数える
+        // （reactions は古い順に並んでいる）
+        var latest = {};
+        reactions.forEach(function (rc) {
+          if (!rc.postId || !rc.emoji) return;
+          latest[rc.postId + "|" + (rc.createdById || lower(rc.email) || rc.id)] = rc.id;
+        });
         var byPost = {};
         var index = {};
         reactions.forEach(function (rc) {
           if (!rc.postId || !rc.emoji) return;
+          if (latest[rc.postId + "|" + (rc.createdById || lower(rc.email) || rc.id)] !== rc.id) return;
           var list = byPost[rc.postId] || (byPost[rc.postId] = []);
           var k = rc.postId + "|" + rc.emoji;
           var g = index[k];
@@ -536,38 +555,58 @@
       return reactionGroups[projectId] || EMPTY;
     }
 
-    // 自分のリアクションを付ける／外す（もう一度押すと外れる）
+    // 自分のリアクションを付ける／付け替える／外す。リアクションは1投稿につき1人1つまで。
+    // - まだ付けていない → 付ける
+    // - 別の絵文字を付けている → 付け替える（前のリアクションは外す）
+    // - 同じ絵文字を付けている → 外す
     function toggleReaction(projectId, emoji) {
-      var key = projectId + "|" + emoji;
+      var key = projectId;
       if (reactionBusyRef.current[key]) return Promise.resolve();
       var mineList = reactions.filter(function (rc) {
-        return rc.postId === projectId && rc.emoji === emoji && isMyReaction(rc);
+        return rc.postId === projectId && isMyReaction(rc);
+      });
+      var ids = mineList.map(function (rc) {
+        return rc.id;
+      });
+      var removing = mineList.some(function (rc) {
+        return rc.emoji === emoji;
       });
       reactionBusyRef.current[key] = true;
       function done() {
         delete reactionBusyRef.current[key];
       }
-      if (mineList.length) {
-        var ids = mineList.map(function (rc) {
-          return rc.id;
-        });
-        setReactions(function (prev) {
-          return prev.filter(function (rc) {
-            return ids.indexOf(rc.id) === -1;
-          });
-        });
+      function removeAll(list) {
         return Promise.all(
-          ids.map(function (rid) {
+          list.map(function (rid) {
             return AppSF.removeReaction(rid);
           })
-        ).then(done, function (e) {
-          done();
-          setReactions(function (prev) {
-            return prev.concat(mineList);
-          });
-          toast(e.message, "error");
+        );
+      }
+      function restore(e, tmpId) {
+        done();
+        setReactions(function (prev) {
+          return prev
+            .filter(function (rc) {
+              return rc.id !== tmpId && ids.indexOf(rc.id) === -1;
+            })
+            .concat(mineList);
+        });
+        toast(e.message, "error");
+      }
+
+      // 画面には先に反映する（自分の今のリアクションを外す）
+      setReactions(function (prev) {
+        return prev.filter(function (rc) {
+          return ids.indexOf(rc.id) === -1;
+        });
+      });
+
+      if (removing) {
+        return removeAll(ids).then(done, function (e) {
+          restore(e, null);
         });
       }
+
       var profile = profileRef.current || {};
       var tmp = {
         id: AppData.uid("tmp"),
@@ -582,21 +621,19 @@
       });
       return AppSF.addReaction(projectId, emoji).then(
         function (id) {
-          done();
           setReactions(function (prev) {
             return prev.map(function (rc) {
               return rc.id === tmp.id ? Object.assign({}, tmp, { id: id }) : rc;
             });
           });
+          // 新しいリアクションを保存できてから、前のリアクションを外す
+          // （外せなかった場合も、表示は新しいリアクションだけになる）
+          return removeAll(ids).then(done, function () {
+            done();
+          });
         },
         function (e) {
-          done();
-          setReactions(function (prev) {
-            return prev.filter(function (rc) {
-              return rc.id !== tmp.id;
-            });
-          });
-          toast(e.message, "error");
+          restore(e, tmp.id);
         }
       );
     }
