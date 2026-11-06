@@ -423,82 +423,278 @@ window.AppPages = (function () {
 
     var hasFilter = !!(q || tag);
 
+    // スマートフォンでは、検索サイドバーを「検索・絞り込み」ボタンで開く
+    var _panel = useState(false);
+    var panelOpen = _panel[0],
+      setPanelOpen = _panel[1];
+    useEffect(
+      function () {
+        if (!panelOpen) return;
+        function onKey(e) {
+          if (e.key === "Escape") setPanelOpen(false);
+        }
+        document.addEventListener("keydown", onKey);
+        document.body.classList.add("no-scroll");
+        return function () {
+          document.removeEventListener("keydown", onKey);
+          document.body.classList.remove("no-scroll");
+        };
+      },
+      [panelOpen]
+    );
+
+    // サイドバーに出すハッシュタグ（投稿数の多い順）
+    var tagCounts = useMemo(
+      function () {
+        var map = {};
+        var list = [];
+        store.projects.forEach(function (p) {
+          p.tags.forEach(function (t) {
+            var k = AppUtils.tagKey(t);
+            if (!map[k]) {
+              map[k] = { tag: t, key: k, count: 0 };
+              list.push(map[k]);
+            }
+            map[k].count += 1;
+          });
+        });
+        return list.sort(function (a, b) {
+          return b.count - a.count;
+        });
+      },
+      [store.projects]
+    );
+
+    function clearQ() {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      setInputVal("");
+      applyQuery({ q: "", tag: tag });
+    }
+    function clearAll() {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      setInputVal("");
+      applyQuery({});
+    }
+    function selectTag(t) {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      var same = tag && AppUtils.tagKey(tag) === AppUtils.tagKey(t);
+      applyQuery({ q: inputVal, tag: same ? "" : t });
+    }
+
+    var sidebar = h(SearchSidebar, {
+      inputVal: inputVal,
+      onInputChange: onInputChange,
+      onClearQ: clearQ,
+      onClearAll: clearAll,
+      tag: tag,
+      q: q,
+      hasFilter: hasFilter,
+      tagCounts: tagCounts,
+      onSelectTag: selectTag,
+      resultCount: filtered.length,
+      onClose: function () {
+        setPanelOpen(false);
+      },
+    });
+
     return h(
-      React.Fragment,
-      null,
+      "div",
+      { className: "feed-layout" },
+      // スマートフォン用：検索・絞り込みボタンと、今の条件
       h(
         "div",
-        { className: "search-bar" },
+        { className: "feed-mobile-bar" },
         h(
-          "div",
-          { className: "search-input-wrap" },
-          h("span", { "aria-hidden": true }, "\u{1F50D}"),
-          h("input", {
-            value: inputVal,
-            onChange: onInputChange,
-            placeholder: "案件名・ハッシュタグで検索（#は省略可）",
-          }),
-          inputVal
-            ? h(
-                "button",
-                {
-                  className: "topbar-icon-btn",
-                  onClick: function () {
-                    setInputVal("");
-                    applyQuery({ q: "", tag: tag });
-                  },
-                  "aria-label": "検索語をクリア",
-                },
-                "×"
-              )
-            : null
+          "button",
+          {
+            type: "button",
+            className: "btn sm feed-filter-btn",
+            onClick: function () {
+              setPanelOpen(true);
+            },
+          },
+          h(SearchIcon, null),
+          "検索・絞り込み"
         ),
         hasFilter
           ? h(
               "div",
-              { className: "search-chips" },
-              q
-                ? h(C.Chip, {
-                    label: "検索: " + q,
-                    onRemove: function () {
-                      setInputVal("");
-                      applyQuery({ q: "", tag: tag });
-                    },
-                  })
-                : null,
-              tag
-                ? h(C.Chip, {
-                    label: tag,
-                    onRemove: function () {
-                      applyQuery({ q: q, tag: "" });
-                    },
-                  })
-                : null,
+              { className: "feed-mobile-conds" },
+              q ? h("span", { className: "cond" }, "「" + q + "」") : null,
+              tag ? h("span", { className: "cond" }, "#" + tag) : null,
               h(
                 "button",
-                {
-                  className: "btn ghost sm",
-                  onClick: function () {
-                    setInputVal("");
-                    applyQuery({});
-                  },
-                },
-                "すべて解除"
+                { type: "button", className: "link-btn", onClick: clearAll },
+                "解除"
               )
+            )
+          : h("span", { className: "feed-mobile-count" }, filtered.length + "件")
+      ),
+      h(
+        "aside",
+        { className: cx("feed-sidebar", panelOpen && "open"), "aria-label": "検索・絞り込み" },
+        sidebar
+      ),
+      panelOpen
+        ? h("div", {
+            className: "feed-sidebar-overlay",
+            onClick: function () {
+              setPanelOpen(false);
+            },
+          })
+        : null,
+      h(
+        "div",
+        { className: "feed-main" },
+        h(C.PhotoGrid, {
+          key: qsKey,
+          projects: filtered,
+          reactionsFor: store.reactionsAvailable ? store.reactionsFor : null,
+          pageSize: 18,
+          initialVisibleCount: initialVisibleCountForKey,
+          onVisibleCountChange: handleVisibleCountChange,
+          emptyMessage: hasFilter
+            ? "条件に一致する案件が見つかりませんでした。検索条件を変えてお試しください。"
+            : "まだ案件が投稿されていません。",
+        })
+      )
+    );
+  }
+
+  function SearchIcon() {
+    return h(
+      "svg",
+      { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", "aria-hidden": true },
+      h("circle", { cx: 11, cy: 11, r: 7 }),
+      h("path", { d: "M20 20l-3.5-3.5" })
+    );
+  }
+
+  // 一覧の検索サイドバー（PCは左側に常に表示。スマートフォンは左から開くパネル）
+  var SIDEBAR_TAGS = 15;
+  function SearchSidebar(props) {
+    var _all = useState(false);
+    var showAll = _all[0],
+      setShowAll = _all[1];
+    var tagKey = props.tag ? AppUtils.tagKey(props.tag) : "";
+    var list = showAll ? props.tagCounts : props.tagCounts.slice(0, SIDEBAR_TAGS);
+    // 選択中のタグが表示範囲外なら先頭に出す
+    if (tagKey && !list.some(function (t) { return t.key === tagKey; })) {
+      var sel = props.tagCounts.find(function (t) {
+        return t.key === tagKey;
+      });
+      list = [sel || { tag: props.tag, key: tagKey, count: 0 }].concat(list);
+    }
+    return h(
+      "div",
+      { className: "sidebar-inner" },
+      h(
+        "div",
+        { className: "sidebar-head" },
+        h("div", { className: "sidebar-title" }, "検索・絞り込み"),
+        h(
+          "button",
+          { type: "button", className: "topbar-icon-btn sidebar-close", onClick: props.onClose, "aria-label": "閉じる" },
+          "×"
+        )
+      ),
+      h(
+        "div",
+        { className: "sidebar-section" },
+        h("label", { className: "sidebar-label", htmlFor: "feed-search" }, "キーワード"),
+        h(
+          "div",
+          { className: "search-input-wrap" },
+          h(SearchIcon, null),
+          h("input", {
+            id: "feed-search",
+            type: "search",
+            value: props.inputVal,
+            onChange: props.onInputChange,
+            placeholder: "案件名・ハッシュタグ",
+            enterKeyHint: "search",
+          }),
+          props.inputVal
+            ? h(
+                "button",
+                { type: "button", className: "topbar-icon-btn", onClick: props.onClearQ, "aria-label": "検索語をクリア" },
+                "×"
+              )
+            : null
+        ),
+        h("div", { className: "sidebar-hint" }, "#は省略できます")
+      ),
+      h(
+        "div",
+        { className: "sidebar-section" },
+        h("div", { className: "sidebar-label" }, "ハッシュタグ"),
+        props.tagCounts.length
+          ? h(
+              "ul",
+              { className: "sidebar-tags" },
+              h(
+                "li",
+                null,
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: cx("sidebar-tag", !tagKey && "active"),
+                    onClick: function () {
+                      if (tagKey) props.onSelectTag(props.tag);
+                    },
+                  },
+                  h("span", null, "すべて")
+                )
+              ),
+              list.map(function (t) {
+                return h(
+                  "li",
+                  { key: t.key },
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      className: cx("sidebar-tag", t.key === tagKey && "active"),
+                      "aria-pressed": t.key === tagKey,
+                      onClick: function () {
+                        props.onSelectTag(t.tag);
+                      },
+                    },
+                    h("span", { className: "sidebar-tag-name" }, "#" + t.tag),
+                    h("span", { className: "sidebar-tag-count" }, t.count)
+                  )
+                );
+              })
+            )
+          : h("div", { className: "sidebar-hint" }, "タグはまだありません"),
+        props.tagCounts.length > SIDEBAR_TAGS
+          ? h(
+              "button",
+              {
+                type: "button",
+                className: "link-btn",
+                onClick: function () {
+                  setShowAll(!showAll);
+                },
+              },
+              showAll ? "少なく表示" : "すべてのタグを表示（" + props.tagCounts.length + "件）"
             )
           : null
       ),
-      h(C.PhotoGrid, {
-        key: qsKey,
-        projects: filtered,
-        reactionsFor: store.reactionsAvailable ? store.reactionsFor : null,
-        pageSize: 18,
-        initialVisibleCount: initialVisibleCountForKey,
-        onVisibleCountChange: handleVisibleCountChange,
-        emptyMessage: hasFilter
-          ? "条件に一致する案件が見つかりませんでした。検索条件を変えてお試しください。"
-          : "まだ案件が投稿されていません。",
-      })
+      h(
+        "div",
+        { className: "sidebar-foot" },
+        h("div", { className: "sidebar-count" }, props.resultCount + "件の案件"),
+        props.hasFilter
+          ? h("button", { type: "button", className: "btn ghost sm", onClick: props.onClearAll }, "条件をすべて解除")
+          : null,
+        h(
+          "button",
+          { type: "button", className: "btn primary sidebar-done", onClick: props.onClose },
+          props.resultCount + "件の結果を見る"
+        )
+      )
     );
   }
 

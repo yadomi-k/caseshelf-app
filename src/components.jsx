@@ -215,7 +215,7 @@ window.AppComponents = (function () {
     );
   }
 
-  // 一覧の写真に重ねる、リアクションの小さな表示（多い絵文字を最大3つ＋合計数）
+  // 一覧のカードに出す、リアクションの小さな表示（多い絵文字を最大3つ＋合計数）
   function GridReactions(props) {
     var groups = (props.groups || []).slice();
     if (!groups.length) return null;
@@ -227,11 +227,11 @@ window.AppComponents = (function () {
     });
     return h(
       "span",
-      { className: "grid-reactions", title: "リアクション " + total + "件" },
+      { className: "card-reactions", title: "リアクション " + total + "件" },
       groups.slice(0, 3).map(function (g) {
-        return h("span", { key: g.emoji, className: "grid-reaction-emoji" }, g.emoji);
+        return h("span", { key: g.emoji, className: "card-reaction-emoji" }, g.emoji);
       }),
-      h("span", { className: "grid-reaction-count" }, total)
+      h("span", { className: "card-reaction-count" }, total)
     );
   }
 
@@ -389,19 +389,56 @@ window.AppComponents = (function () {
     );
   }
 
+  function formatDate(iso) {
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    return d.getFullYear() + "/" + (d.getMonth() + 1) + "/" + d.getDate();
+  }
+
+  // 一覧のカード（上に写真、下に案件名・説明・タグ。文字が写真に重ならないようにする）
+  var CARD_MAX_TAGS = 3;
   function GridItem(props) {
     var project = props.project;
     var cover =
       project.photos.find(function (p) {
         return p.id === project.coverPhotoId;
       }) || project.photos[0];
+    var tags = project.tags.slice(0, CARD_MAX_TAGS);
+    var moreTags = project.tags.length - tags.length;
+    var desc = String(project.description || "").split(/\r?\n/)[0];
     return h(
       "a",
-      { className: "grid-item", href: "#/project/" + project.id },
-      h(Photo, { photo: cover, alt: project.title, loading: "lazy" }),
-      project.photos.length > 1 ? h(MultiBadge, null) : null,
-      props.reactions ? h(GridReactions, { groups: props.reactions }) : null,
-      h("div", { className: "grid-title" }, project.title)
+      { className: "work-card", href: "#/project/" + project.id },
+      h(
+        "div",
+        { className: "work-card-photo" },
+        h(Photo, { photo: cover, alt: project.title, loading: "lazy" }),
+        project.photos.length > 1 ? h(MultiBadge, null) : null,
+        project.isSample ? h("span", { className: "work-card-sample" }, "サンプル") : null
+      ),
+      h(
+        "div",
+        { className: "work-card-body" },
+        h("div", { className: "work-card-title" }, project.title),
+        desc ? h("div", { className: "work-card-desc" }, desc) : null,
+        tags.length
+          ? h(
+              "div",
+              { className: "work-card-tags" },
+              tags.map(function (t) {
+                return h("span", { key: t, className: "work-card-tag" }, "#" + t);
+              }),
+              moreTags > 0 ? h("span", { className: "work-card-tag more" }, "+" + moreTags) : null
+            )
+          : null,
+        h(
+          "div",
+          { className: "work-card-foot" },
+          h("span", { className: "work-card-date" }, formatDate(project.createdAt)),
+          props.reactions ? h(GridReactions, { groups: props.reactions }) : null,
+          h("span", { className: "work-card-arrow", "aria-hidden": true }, "›")
+        )
+      )
     );
   }
 

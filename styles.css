@@ -191,10 +191,154 @@ img { display: block; max-width: 100%; }
   border-bottom: 1px solid #f0dca0;
 }
 
-/* ---------- Search bar ---------- */
+/* ---------- 一覧の検索サイドバー ---------- */
 
-.search-bar {
-  padding: 0.625rem 0.75rem 0.375rem;
+.feed-layout { position: relative; }
+
+@media (min-width: 860px) {
+  .feed-layout {
+    display: grid;
+    grid-template-columns: 15.5rem minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.feed-main { min-width: 0; }
+
+.feed-mobile-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.625rem 0.75rem 0;
+}
+.feed-filter-btn { display: inline-flex; align-items: center; gap: 0.375rem; flex: none; }
+.feed-mobile-conds {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+  font-size: 0.75rem;
+}
+.feed-mobile-conds .cond {
+  padding: 0.1875rem 0.5rem;
+  border-radius: 62.4375rem;
+  background: var(--color-accent-dim);
+  color: var(--color-accent);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.feed-mobile-count { font-size: 0.75rem; color: var(--color-text-dim); }
+
+.link-btn {
+  border: none;
+  background: none;
+  padding: 0.25rem 0;
+  color: var(--color-accent);
+  font-size: 0.75rem;
+  text-decoration: underline;
+  flex: none;
+}
+
+/* スマートフォン：左から開くパネル */
+.feed-sidebar {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 50;
+  width: min(20rem, 86vw);
+  background: var(--color-surface);
+  box-shadow: 0 0 2rem rgba(0,0,0,0.2);
+  transform: translateX(-105%);
+  transition: transform 0.2s ease;
+  overflow-y: auto;
+  visibility: hidden;
+}
+.feed-sidebar.open { transform: none; visibility: visible; }
+.feed-sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  background: rgba(0,0,0,0.35);
+}
+body.no-scroll { overflow: hidden; }
+
+.sidebar-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 1.125rem;
+  padding: 1rem;
+  min-height: 100%;
+}
+.sidebar-head { display: flex; align-items: center; justify-content: space-between; }
+.sidebar-title { font-size: 0.9375rem; font-weight: 700; }
+.sidebar-label {
+  display: block;
+  margin-bottom: 0.4375rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  letter-spacing: 0.04em;
+}
+.sidebar-hint { margin-top: 0.3125rem; font-size: 0.6875rem; color: var(--color-text-dim); }
+
+.sidebar-tags { list-style: none; margin: 0 0 0.375rem; padding: 0; display: flex; flex-direction: column; gap: 0.125rem; }
+.sidebar-tag {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4375rem 0.625rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--color-text);
+  font-size: 0.8125rem;
+  text-align: left;
+}
+.sidebar-tag:hover { background: #f2f2f2; }
+.sidebar-tag.active { background: var(--color-accent); color: #fff; font-weight: 700; }
+.sidebar-tag-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-tag-count { flex: none; font-size: 0.6875rem; color: var(--color-text-dim); font-variant-numeric: tabular-nums; }
+.sidebar-tag.active .sidebar-tag-count { color: rgba(255,255,255,0.85); }
+
+.sidebar-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-border);
+}
+.sidebar-count { font-size: 0.8125rem; font-weight: 600; }
+.sidebar-done { width: 100%; }
+
+@media (min-width: 860px) {
+  .feed-mobile-bar,
+  .feed-sidebar-overlay,
+  .sidebar-close,
+  .sidebar-done { display: none; }
+  /* PC：左側に常に表示し、スクロールしても付いてくる */
+  .feed-sidebar {
+    position: sticky;
+    top: var(--topbar-h);
+    z-index: 1;
+    width: auto;
+    max-height: calc(100vh - var(--topbar-h));
+    transform: none;
+    visibility: visible;
+    box-shadow: none;
+    background: transparent;
+    border-right: 1px solid var(--color-border);
+    transition: none;
+  }
+  .sidebar-inner { min-height: 0; padding: 0.875rem 1rem 1.25rem; }
+  .sidebar-foot { margin-top: 0; }
 }
 
 .search-input-wrap {
@@ -214,12 +358,6 @@ img { display: block; max-width: 100%; }
   font-size: 0.9375rem;
 }
 
-.search-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.375rem;
-  padding: 0.5rem 0 0.125rem;
-}
 
 .chip {
   display: inline-flex;
@@ -251,60 +389,159 @@ img { display: block; max-width: 100%; }
   text-align: center;
 }
 
-/* ---------- Photo grid ---------- */
+/* ---------- Works grid（写真の下に案件名を出すカード一覧） ---------- */
 
 .photo-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--gap-grid);
-  padding: var(--gap-grid);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.625rem;
+  padding: 0.625rem 0.75rem;
 }
 
-@media (min-width: 540px) {
-  .photo-grid { grid-template-columns: repeat(4, 1fr); }
+@media (min-width: 600px) {
+  .photo-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.875rem; padding: 0.875rem 1rem; }
 }
-@media (min-width: 760px) {
-  .photo-grid { grid-template-columns: repeat(5, 1fr); }
-}
-@media (min-width: 1000px) {
-  /* PCでは画面を大きく表示するため、写真が小さくなりすぎないよう5列にする */
-  .photo-grid { grid-template-columns: repeat(5, 1fr); }
+@media (min-width: 1200px) {
+  /* 検索サイドバーが無い画面（保存一覧・マイページ）では4列 */
+  .photo-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .feed-main .photo-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
-.grid-item {
-  position: relative;
-  aspect-ratio: 1 / 1;
+.work-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
   overflow: hidden;
-  background: #eee;
-  border: none;
-  padding: 0;
-  display: block;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
 }
+.work-card:hover {
+  box-shadow: 0 0.375rem 1.25rem rgba(0,0,0,0.1);
+  transform: translateY(-1px);
+}
+.work-card:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 
-.grid-item img {
+.work-card-photo {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  background: #eee;
+  overflow: hidden;
+}
+.work-card-photo img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-
-.grid-item .multi-badge {
+.work-card-photo .multi-badge {
   position: absolute;
   top: 0.375rem;
   right: 0.375rem;
   color: #fff;
   filter: drop-shadow(0 0 0.125rem rgba(0,0,0,0.6));
 }
-
-.grid-item .grid-title {
+.work-card-sample {
   position: absolute;
-  left: 0; right: 0; bottom: 0;
-  padding: 1rem 0.375rem 0.3125rem;
-  font-size: 0.6875rem;
-  color: #fff;
-  background: linear-gradient(to top, rgba(0,0,0,0.55), rgba(0,0,0,0));
+  left: 0.375rem;
+  top: 0.375rem;
+  padding: 0.125rem 0.4375rem;
+  border-radius: 0.25rem;
+  background: rgba(255,255,255,0.9);
+  color: var(--color-text-dim);
+  font-size: 0.625rem;
+  font-weight: 600;
+}
+
+.work-card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3125rem;
+  padding: 0.625rem 0.75rem 0.5rem;
+  min-width: 0;
+}
+
+.work-card-title {
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.45;
+  color: var(--color-text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.work-card-desc {
+  font-size: 0.75rem;
+  color: var(--color-text-dim);
+  line-height: 1.5;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.work-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.125rem;
+}
+.work-card-tag {
+  max-width: 100%;
+  padding: 0.125rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 62.4375rem;
+  font-size: 0.6875rem;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.work-card-tag.more { color: var(--color-text-dim); }
+
+.work-card-foot {
+  margin-top: auto;
+  padding-top: 0.3125rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.6875rem;
+  color: var(--color-text-dim);
+}
+.work-card-date { flex: none; }
+
+.card-reactions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.0625rem;
+  min-width: 0;
+  color: var(--color-text);
+}
+.card-reaction-count { margin-left: 0.1875rem; font-weight: 700; }
+
+.work-card-arrow {
+  margin-left: auto;
+  flex: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--color-text);
+}
+.work-card:hover .work-card-arrow { border-color: var(--color-accent); color: var(--color-accent); }
+
+@media (max-width: 599px) {
+  .work-card-body { padding: 0.5rem 0.5625rem 0.4375rem; }
+  .work-card-title { font-size: 0.8125rem; }
+  .work-card-arrow { display: none; }
 }
 
 .grid-sentinel {
@@ -670,24 +907,6 @@ img { display: block; max-width: 100%; }
 }
 .reaction-who li { display: flex; gap: 0.5rem; padding: 0.1875rem 0; }
 .reaction-who-emoji { flex: none; width: 1.25rem; text-align: center; }
-
-.grid-item .grid-reactions {
-  position: absolute;
-  top: 0.375rem;
-  left: 0.375rem;
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.0625rem;
-  padding: 0.125rem 0.375rem;
-  border-radius: 62.4375rem;
-  background: rgba(255,255,255,0.92);
-  color: var(--color-text);
-  font-size: 0.6875rem;
-  line-height: 1.2;
-  box-shadow: 0 0 0.25rem rgba(0,0,0,0.2);
-}
-.grid-reaction-count { margin-left: 0.1875rem; font-weight: 700; }
 
 .tag-list {
   display: flex;
@@ -1170,3 +1389,7 @@ img { display: block; max-width: 100%; }
 .load-error { flex-direction: column; gap: 0.75rem; text-align: center; }
 .load-error p { margin: 0; }
 .load-error-detail { font-size: 0.8125rem; color: var(--color-danger); max-width: 32rem; line-height: 1.6; }
+
+/* 検索欄：ブラウザ標準の「×」は使わない（独自のクリアボタンがあるため） */
+.search-input-wrap input[type="search"] { -webkit-appearance: none; appearance: none; }
+.search-input-wrap input[type="search"]::-webkit-search-cancel-button { display: none; }
