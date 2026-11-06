@@ -5,6 +5,7 @@
 //   CaseShelf_User__c     CaseShelfの利用者（表示名・メール・権限・状態・プロフィール画像）
 //   CaseShelf_Save__c     保存（ブックマーク）。所有者＝保存した人
 //   CaseShelf_Request__c  未登録の人からの利用登録の依頼
+//   CaseShelf_Reaction__c 投稿へのリアクション（絵文字）。作成者＝リアクションした人
 //   写真・プロフィール画像は Salesforce のファイル（ContentVersion）として、投稿・利用者のレコードにひも付けて保存する。
 //
 // 投稿者は、投稿レコードの「作成者」（Salesforceのユーザー）のメールアドレスで CaseShelf の利用者と対応させる。
@@ -16,6 +17,7 @@ window.AppSF = (function () {
     user: "CaseShelf_User__c",
     save: "CaseShelf_Save__c",
     request: "CaseShelf_Request__c",
+    reaction: "CaseShelf_Reaction__c",
   };
 
   function api(method, path, body, opts) {
@@ -156,6 +158,34 @@ window.AppSF = (function () {
       return rs.map(function (r) {
         return { id: r.Id, postId: r.Post__c || null };
       });
+    });
+  }
+
+  // 全員のリアクション。[{ id, postId, emoji, createdById, email, name }]
+  function toReaction(r) {
+    return {
+      id: r.Id,
+      postId: r.Post__c || null,
+      emoji: r.Emoji__c || "",
+      createdById: r.CreatedById || "",
+      email: (r.CreatedBy && r.CreatedBy.Email) || "",
+      name: (r.CreatedBy && r.CreatedBy.Name) || "",
+    };
+  }
+  var REACTION_FIELDS = "Id, Post__c, Emoji__c, CreatedById, CreatedBy.Email, CreatedBy.Name";
+
+  function loadReactions() {
+    return query("SELECT " + REACTION_FIELDS + " FROM " + OBJ.reaction + " ORDER BY CreatedDate").then(function (rs) {
+      return rs.map(toReaction);
+    });
+  }
+
+  // 1件の投稿のリアクションだけを読み込み直す（詳細画面を開いたとき）
+  function loadPostReactions(postId) {
+    return query(
+      "SELECT " + REACTION_FIELDS + " FROM " + OBJ.reaction + " WHERE Post__c = " + q(postId) + " ORDER BY CreatedDate"
+    ).then(function (rs) {
+      return rs.map(toReaction);
     });
   }
 
@@ -310,6 +340,16 @@ window.AppSF = (function () {
   }
 
   // ------------------------------------------------------------------
+  // リアクション
+  // ------------------------------------------------------------------
+  function addReaction(postId, emoji) {
+    return create(OBJ.reaction, { Post__c: postId, Emoji__c: emoji });
+  }
+  function removeReaction(reactionId) {
+    return remove(OBJ.reaction, reactionId);
+  }
+
+  // ------------------------------------------------------------------
   // 利用者
   // ------------------------------------------------------------------
   function createUser(data) {
@@ -369,6 +409,10 @@ window.AppSF = (function () {
     loadPosts: loadPosts,
     loadMySaves: loadMySaves,
     loadPendingRequests: loadPendingRequests,
+    loadReactions: loadReactions,
+    loadPostReactions: loadPostReactions,
+    addReaction: addReaction,
+    removeReaction: removeReaction,
     imageUrl: imageUrl,
     uploadImage: uploadImage,
     deleteFiles: deleteFiles,

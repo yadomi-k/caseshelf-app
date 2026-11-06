@@ -98,6 +98,7 @@
   // 投稿・利用者・保存・利用登録の依頼は、すべてSalesforceに保存する（src/sfdata.js）。
   // ログイン時（と、しばらくしてから画面に戻ったとき）に読み込み、変更はその都度Salesforceに書き込む。
   var REFRESH_AFTER_MS = 60 * 1000;
+  var EMPTY = [];
 
   function lower(s) {
     return String(s || "").trim().toLowerCase();
@@ -136,6 +137,14 @@
     var _requests = useState([]);
     var requests = _requests[0],
       setRequests = _requests[1];
+    var _reactions = useState([]);
+    var reactions = _reactions[0],
+      setReactions = _reactions[1];
+    // Salesforceにリアクション用のオブジェクトが無い（設定前）・読めない場合は false。リアクション欄を出さない
+    var _reactOk = useState(true);
+    var reactionsAvailable = _reactOk[0],
+      setReactionsAvailable = _reactOk[1];
+    var reactionBusyRef = React.useRef({});
     var lastLoadedRef = React.useRef(0);
     var profileRef = React.useRef(null);
 
@@ -145,6 +154,7 @@
       setPosts([]);
       setSaves([]);
       setRequests([]);
+      setReactions([]);
     }
 
     // ログインした人のデータを読み込む。
@@ -171,6 +181,11 @@
             AppSF.loadPosts(),
             AppSF.loadMySaves(profile.sfUserId),
             isAdminUser ? AppSF.loadPendingRequests() : Promise.resolve([]),
+            // リアクションが読めなくても、ほかの機能は使えるようにする
+            AppSF.loadReactions().catch(function (e) {
+              if (e && e.status === 401) throw e;
+              return null;
+            }),
           ]).then(function (r) {
             setCurrentUser(me);
             setUsers(r[0]);
@@ -185,6 +200,23 @@
               })
             );
             setRequests(r[3]);
+            if (r[4]) {
+              // 投稿が削除されて空になった自分のリアクションは消す
+              r[4].forEach(function (rc) {
+                if (!rc.postId && rc.createdById && rc.createdById === profile.sfUserId) {
+                  AppSF.removeReaction(rc.id).catch(function () {});
+                }
+              });
+              setReactions(
+                r[4].filter(function (rc) {
+                  return !!rc.postId;
+                })
+              );
+              setReactionsAvailable(true);
+            } else {
+              setReactions([]);
+              setReactionsAvailable(false);
+            }
             lastLoadedRef.current = Date.now();
             setPhase("ready");
             return { ok: true };
@@ -374,9 +406,27 @@
           })
         )
           .then(function () {
+            // この投稿のリアクションも消す（他の人のリアクションは管理者以外は消せないので、失敗しても続ける。
+            // 消せなかったものは、リアクションした人が次にログインしたときに消える）
+            return Promise.all(
+              reactions
+                .filter(function (rc) {
+                  return rc.postId === id;
+                })
+                .map(function (rc) {
+                  return AppSF.removeReaction(rc.id).catch(function () {});
+                })
+            );
+          })
+          .then(function () {
             return AppSF.deletePost(id, photoIds);
           })
           .then(function () {
+            setReactions(function (prev) {
+              return prev.filter(function (rc) {
+                return rc.postId !== id;
+              });
+            });
             setPosts(function (prev) {
               return prev.filter(function (x) {
                 return x.id !== id;
@@ -438,6 +488,137 @@
           });
           toast(e.message, "error");
         }
+      );
+    }
+
+    // ---------------- リアクション ----------------
+    function isMyReaction(rc) {
+      var mySfId = profileRef.current && profileRef.current.sfUserId;
+      if (mySfId && rc.createdById) return rc.createdById === mySfId;
+      return !!currentUser && lower(rc.email) === lower(currentUser.email);
+    }
+
+    // 投稿のリアクションを絵文字ごとにまとめる（最初にリアクションされた順）。
+    // [{ emoji, count, mine, names: [表示名] }]
+    var reactionGroups = React.useMemo(
+      function () {
+        var byEmail = {};
+        users.forEach(function (u) {
+          byEmail[lower(u.email)] = u;
+        });
+        var byPost = {};
+        var index = {};
+        reactions.forEach(function (rc) {
+          if (!rc.postId || !rc.emoji) return;
+          var list = byPost[rc.postId] || (byPost[rc.postId] = []);
+          var k = rc.postId + "|" + rc.emoji;
+          var g = index[k];
+          if (!g) {
+            g = index[k] = { emoji: rc.emoji, count: 0, mine: false, names: [], people: {} };
+            list.push(g);
+          }
+          // 同じ人の同じ絵文字は1つとして数える
+          var who = rc.createdById || lower(rc.email) || rc.id;
+          if (g.people[who]) return;
+          g.people[who] = true;
+          g.count += 1;
+          var mine = isMyReaction(rc);
+          if (mine) g.mine = true;
+          var u = byEmail[lower(rc.email)];
+          g.names.push(mine ? "あなた" : (u && u.displayName) || rc.name || "不明な利用者");
+        });
+        return byPost;
+      },
+      [reactions, users, currentUser]
+    );
+
+    function reactionsFor(projectId) {
+      return reactionGroups[projectId] || EMPTY;
+    }
+
+    // 自分のリアクションを付ける／外す（もう一度押すと外れる）
+    function toggleReaction(projectId, emoji) {
+      var key = projectId + "|" + emoji;
+      if (reactionBusyRef.current[key]) return Promise.resolve();
+      var mineList = reactions.filter(function (rc) {
+        return rc.postId === projectId && rc.emoji === emoji && isMyReaction(rc);
+      });
+      reactionBusyRef.current[key] = true;
+      function done() {
+        delete reactionBusyRef.current[key];
+      }
+      if (mineList.length) {
+        var ids = mineList.map(function (rc) {
+          return rc.id;
+        });
+        setReactions(function (prev) {
+          return prev.filter(function (rc) {
+            return ids.indexOf(rc.id) === -1;
+          });
+        });
+        return Promise.all(
+          ids.map(function (rid) {
+            return AppSF.removeReaction(rid);
+          })
+        ).then(done, function (e) {
+          done();
+          setReactions(function (prev) {
+            return prev.concat(mineList);
+          });
+          toast(e.message, "error");
+        });
+      }
+      var profile = profileRef.current || {};
+      var tmp = {
+        id: AppData.uid("tmp"),
+        postId: projectId,
+        emoji: emoji,
+        createdById: profile.sfUserId || "",
+        email: (currentUser && currentUser.email) || profile.email || "",
+        name: (currentUser && currentUser.displayName) || profile.name || "",
+      };
+      setReactions(function (prev) {
+        return prev.concat([tmp]);
+      });
+      return AppSF.addReaction(projectId, emoji).then(
+        function (id) {
+          done();
+          setReactions(function (prev) {
+            return prev.map(function (rc) {
+              return rc.id === tmp.id ? Object.assign({}, tmp, { id: id }) : rc;
+            });
+          });
+        },
+        function (e) {
+          done();
+          setReactions(function (prev) {
+            return prev.filter(function (rc) {
+              return rc.id !== tmp.id;
+            });
+          });
+          toast(e.message, "error");
+        }
+      );
+    }
+
+    // 詳細画面を開いたとき、その投稿のリアクションを最新にする
+    function refreshPostReactions(projectId) {
+      if (!reactionsAvailable) return Promise.resolve();
+      return AppSF.loadPostReactions(projectId).then(
+        function (list) {
+          setReactions(function (prev) {
+            // 送信中（仮ID）の自分のリアクションは残す
+            var pending = prev.filter(function (rc) {
+              return rc.postId === projectId && String(rc.id).indexOf("tmp_") === 0;
+            });
+            return prev
+              .filter(function (rc) {
+                return rc.postId !== projectId;
+              })
+              .concat(list, pending);
+          });
+        },
+        function () {}
       );
     }
 
@@ -605,6 +786,10 @@
       deleteProject: deleteProject,
       isSaved: isSaved,
       toggleSave: toggleSave,
+      reactionsAvailable: reactionsAvailable,
+      reactionsFor: reactionsFor,
+      toggleReaction: toggleReaction,
+      refreshPostReactions: refreshPostReactions,
       updateProfile: updateProfile,
       allTags: allTags,
       admin: admin,
