@@ -9,6 +9,20 @@ window.AppConfig = {
     // 接続アプリケーションの「コンシューマ鍵」
     clientId: "3MVG9YDQS5WtC11pWkeuHxMae_.5kSdZ6uN6lnE7Sd.prc3wWdF.mIDSsrzVOCz._nlBnGuYhFXM2fFmr4Arw",
   },
+  // 投稿画面の「物件Noで検索」で使う、Salesforceの商談の設定
+  salesforceOpportunity: {
+    // 検索するオブジェクト（商談 = Opportunity）
+    object: "Opportunity",
+    // 物件Noが入っている項目の「API参照名」（Salesforceの 設定 → オブジェクトマネージャ → 商談 → 項目とリレーション で確認）
+    // ※ 仮の値です。実際の項目のAPI参照名に書き換えてください
+    propertyNoField: "PropertyNo__c",
+  },
+  // 最初の管理者のメールアドレス（Salesforceと同じもの）。
+  // この人は、CaseShelfの利用者がまだ登録されていなくても、初回ログイン時に自動で「管理者」として登録される。
+  // ※Salesforce側で「CaseShelf管理者」の権限セットが付与されている必要がある
+  initialAdminEmails: ["yadomi-k@shoei-bijutsu.co.jp"],
+  // 公開実績ページをもとにしたサンプル投稿を一覧に表示するか（閲覧専用）。不要になったら false にする
+  showSamplePosts: true,
   // 未登録の人が「利用登録を依頼」したときに、依頼メールの宛先にするアドレス
   // （管理者のアドレスや、アカウント作成依頼を受け付けている共有アドレス）
   accountRequestEmail: "yadomi-k@shoei-bijutsu.co.jp",

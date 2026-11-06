@@ -110,6 +110,46 @@ window.AppUtils = (function () {
     });
   }
 
+  // 画像ファイルを、長辺 maxEdge px 以内のJPEGに縮小して data URL で返す
+  function compressImage(file, maxEdge, quality) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var w = img.naturalWidth,
+            h = img.naturalHeight;
+          var scale = Math.min(1, maxEdge / Math.max(w, h));
+          var cw = Math.max(1, Math.round(w * scale)),
+            ch = Math.max(1, Math.round(h * scale));
+          var canvas = document.createElement("canvas");
+          canvas.width = cw;
+          canvas.height = ch;
+          var ctx = canvas.getContext("2d");
+          ctx.fillStyle = "#fff"; // 透過部分（PNG等）は白にする
+          ctx.fillRect(0, 0, cw, ch);
+          ctx.drawImage(img, 0, 0, cw, ch);
+          URL.revokeObjectURL(url);
+          resolve(canvas.toDataURL("image/jpeg", quality));
+        } catch (e) {
+          URL.revokeObjectURL(url);
+          reject(e);
+        }
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error("decode error"));
+      };
+      img.src = url;
+    });
+  }
+
+  // バイト数を「12.3MB」のような表記にする
+  function formatMB(bytes) {
+    var mb = (bytes || 0) / (1024 * 1024);
+    return (mb >= 10 ? Math.round(mb) : Math.round(mb * 10) / 10) + "MB";
+  }
+
   function wait(ms) {
     return new Promise(function (resolve) {
       setTimeout(resolve, ms);
@@ -127,6 +167,8 @@ window.AppUtils = (function () {
     parseQuery: parseQuery,
     buildQuery: buildQuery,
     readFileAsDataURL: readFileAsDataURL,
+    compressImage: compressImage,
+    formatMB: formatMB,
     wait: wait,
   };
 })();
