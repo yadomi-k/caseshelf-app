@@ -94,124 +94,195 @@
     return [toasts, toast];
   }
 
-  // ---------------- データストア ----------------
+  // ---------------- データストア（Salesforce） ----------------
+  // 投稿・利用者・保存・利用登録の依頼は、すべてSalesforceに保存する（src/sfdata.js）。
+  // ログイン時（と、しばらくしてから画面に戻ったとき）に読み込み、変更はその都度Salesforceに書き込む。
+  var REFRESH_AFTER_MS = 60 * 1000;
+
+  function lower(s) {
+    return String(s || "").trim().toLowerCase();
+  }
+
+  function initialAdminEmails() {
+    var list = (window.AppConfig && window.AppConfig.initialAdminEmails) || [];
+    return list.map(lower);
+  }
+
   function useStore(toast) {
-    var _users = useState(AppData.loadUsers);
+    // phase: "signedOut" | "loading" | "ready" | "error"
+    var _phase = useState(function () {
+      return AppSSO.getSession() ? "loading" : "signedOut";
+    });
+    var phase = _phase[0],
+      setPhase = _phase[1];
+    var _err = useState(null);
+    var loadError = _err[0],
+      setLoadError = _err[1];
+    var _loginMsg = useState(null); // ログイン画面に出すメッセージ（有効期限切れ・停止など）
+    var loginMessage = _loginMsg[0],
+      setLoginMessage = _loginMsg[1];
+    var _me = useState(null);
+    var currentUser = _me[0],
+      setCurrentUser = _me[1];
+    var _users = useState([]);
     var users = _users[0],
       setUsers = _users[1];
-    var _projects = useState(AppData.loadProjects);
-    var projects = _projects[0],
-      setProjects = _projects[1];
-    var _saves = useState(AppData.loadSaves);
+    var _posts = useState([]);
+    var posts = _posts[0],
+      setPosts = _posts[1];
+    var _saves = useState([]);
     var saves = _saves[0],
       setSaves = _saves[1];
-    var _requests = useState(AppData.loadRequests);
+    var _requests = useState([]);
     var requests = _requests[0],
       setRequests = _requests[1];
-    var _currentUserId = useState(AppData.getCurrentUserId);
-    var currentUserId = _currentUserId[0],
-      setCurrentUserId = _currentUserId[1];
+    var lastLoadedRef = React.useRef(0);
+    var profileRef = React.useRef(null);
 
-    useEffect(
-      function () {
-        var r = AppData.saveUsers(users);
-        if (!r.ok) toast("利用者データの保存に失敗しました（ブラウザの保存容量上限の可能性があります）。", "error");
-      },
-      [users]
-    );
-    useEffect(
-      function () {
-        var r = AppData.saveProjects(projects);
-        if (!r.ok)
-          toast(
-            "保存容量の上限に達した可能性があります。写真のサイズ・枚数を減らしてもう一度お試しください。",
-            "error"
-          );
-      },
-      [projects]
-    );
-    useEffect(
-      function () {
-        AppData.saveSaves(saves);
-      },
-      [saves]
-    );
-    useEffect(
-      function () {
-        AppData.saveRequests(requests);
-      },
-      [requests]
-    );
+    function resetData() {
+      setCurrentUser(null);
+      setUsers([]);
+      setPosts([]);
+      setSaves([]);
+      setRequests([]);
+    }
 
-    // 未登録の人（Salesforceでの本人確認済み）から、利用登録を依頼する。
-    // 同じメールアドレスの未対応の依頼がある場合は、新しく作らない。
-    function requestAccount(profile) {
-      var key = String(profile.email || "").trim().toLowerCase();
-      if (!key) return { ok: false, error: "Salesforceのメールアドレスを取得できませんでした。" };
-      var dup = requests.some(function (r) {
-        return r.status === "pending" && r.email.toLowerCase() === key;
-      });
-      if (dup) return { ok: true, duplicate: true };
-      var req = {
-        id: AppData.uid("req"),
-        email: profile.email,
-        name: profile.name || "",
-        requestedAt: new Date().toISOString(),
-        status: "pending",
+    // ログインした人のデータを読み込む。
+    // { ok: true } / { ok: false, error: "notRegistered", profile } / { ok: false, error: "メッセージ" } を返す
+    function loadAll(profile) {
+      profileRef.current = profile;
+      return AppSF.findUserByEmail(profile.email)
+        .then(function (me) {
+          if (me) return me;
+          // 最初の管理者（src/config.js の initialAdminEmails）は、初回ログイン時に自動で登録する
+          if (initialAdminEmails().indexOf(lower(profile.email)) !== -1) {
+            return AppSF.createUser({ email: profile.email, displayName: profile.name || profile.email, role: "admin" });
+          }
+          return null;
+        })
+        .then(function (me) {
+          if (!me) return { ok: false, error: "notRegistered", profile: profile };
+          if (me.status === "suspended") {
+            return { ok: false, error: "このアカウントは利用停止されています。管理者にお問い合わせください。" };
+          }
+          var isAdminUser = me.role === "admin";
+          return Promise.all([
+            AppSF.loadUsers(),
+            AppSF.loadPosts(),
+            AppSF.loadMySaves(profile.sfUserId),
+            isAdminUser ? AppSF.loadPendingRequests() : Promise.resolve([]),
+          ]).then(function (r) {
+            setCurrentUser(me);
+            setUsers(r[0]);
+            setPosts(r[1]);
+            // 投稿が削除されて空になった保存は消す
+            r[2].forEach(function (sv) {
+              if (!sv.postId) AppSF.removeSave(sv.id).catch(function () {});
+            });
+            setSaves(
+              r[2].filter(function (sv) {
+                return !!sv.postId;
+              })
+            );
+            setRequests(r[3]);
+            lastLoadedRef.current = Date.now();
+            setPhase("ready");
+            return { ok: true };
+          });
+        });
+    }
+
+    function logout(message) {
+      AppSSO.endSession();
+      resetData();
+      setPhase("signedOut");
+      setLoadError(null);
+      setLoginMessage(message || null);
+    }
+
+    // ページを開いたとき、ログイン済みならデータを読み込む
+    useEffect(function () {
+      var s = AppSSO.getSession();
+      if (!s) return;
+      loadAll(s.profile).then(
+        function (res) {
+          if (!res.ok) logout(res.error === "notRegistered" ? null : res.error);
+        },
+        function (e) {
+          if (e.status === 401) return; // 有効期限切れ（下のイベントで処理）
+          setLoadError(e.message);
+          setPhase("error");
+        }
+      );
+    }, []);
+
+    // 接続の有効期限が切れたらログイン画面へ
+    useEffect(function () {
+      function onExpired() {
+        resetData();
+        setPhase("signedOut");
+        setLoginMessage("Salesforceの接続の有効期限が切れました。もう一度ログインしてください。");
+      }
+      window.addEventListener("caseshelf-session-expired", onExpired);
+      return function () {
+        window.removeEventListener("caseshelf-session-expired", onExpired);
       };
-      setRequests(function (prev) {
-        return prev.concat([req]);
-      });
-      return { ok: true, request: req };
-    }
+    }, []);
 
-    var pendingRequests = requests.filter(function (r) {
-      return r.status === "pending";
-    });
+    // しばらくしてから画面に戻ったら、他の人の投稿などを読み込み直す
+    useEffect(
+      function () {
+        function onFocus() {
+          if (phase !== "ready" || !profileRef.current) return;
+          if (Date.now() - lastLoadedRef.current < REFRESH_AFTER_MS) return;
+          refresh();
+        }
+        window.addEventListener("focus", onFocus);
+        return function () {
+          window.removeEventListener("focus", onFocus);
+        };
+      },
+      [phase]
+    );
 
-    var currentUser =
-      users.find(function (u) {
-        return u.id === currentUserId;
-      }) || null;
-    var isAdmin = !!(currentUser && currentUser.role === "admin" && currentUser.status === "active");
-
-    function login(userId) {
-      AppData.setCurrentUserId(userId);
-      setCurrentUserId(userId);
-    }
-    function logout() {
-      AppData.setCurrentUserId(null);
-      setCurrentUserId(null);
-    }
-
-    function findByLoginId(loginId) {
-      var key = String(loginId || "").trim().toLowerCase();
-      return (
-        users.find(function (u) {
-          return (u.loginId || "").toLowerCase() === key || (u.email || "").toLowerCase() === key;
-        }) || null
+    function refresh() {
+      if (!profileRef.current) return Promise.resolve();
+      lastLoadedRef.current = Date.now();
+      return loadAll(profileRef.current).then(
+        function (res) {
+          if (!res.ok) {
+            toast(res.error === "notRegistered" ? "CaseShelfの利用者登録が見つからないため、ログアウトしました。" : res.error, "error");
+            logout(res.error === "notRegistered" ? null : res.error);
+          }
+        },
+        function () {}
       );
     }
 
-    // 管理者の緊急用ログイン（ユーザID・パスワード）。結果は Promise で { ok, error } を返す。
-    // 通常のログインはSalesforceで行う。パスワードでログインできるのは管理者だけ。
-    // IDが存在しない場合とパスワード違いの場合は、同じメッセージを返す
-    // （どのIDが存在するかを推測されにくくするため）。
-    function authenticate(loginId, password) {
-      var user = findByLoginId(loginId);
-      var badCred = { ok: false, error: "ユーザIDまたはパスワードが正しくありません。" };
-      if (!user || !user.passwordHash) return Promise.resolve(badCred);
-      return AppData.hashPassword(user.id, password).then(
-        function (hash) {
-          if (hash !== user.passwordHash) return badCred;
-          if (user.role !== "admin") {
-            return { ok: false, error: "パスワードでのログインは管理者のみ使えます。「Salesforceでログイン」からログインしてください。" };
-          }
-          if (user.status === "suspended") {
-            return { ok: false, error: "このアカウントは利用停止されています。管理者にお問い合わせください。" };
-          }
-          login(user.id);
-          return { ok: true };
+    function reloadPosts() {
+      return AppSF.loadPosts().then(function (list) {
+        setPosts(list);
+        return list;
+      });
+    }
+
+    // Salesforceでログインした人を、メールアドレスでCaseShelfの利用者と照合してデータを読み込む
+    function loginWithSalesforce(profile) {
+      setLoginMessage(null);
+      return loadAll(profile).then(function (res) {
+        if (!res.ok && res.error !== "notRegistered") AppSSO.endSession();
+        return res;
+      });
+    }
+
+    // 未登録の人（Salesforceでの本人確認済み）から、利用登録を依頼する
+    function requestAccount(profile) {
+      if (!profile || !profile.email) {
+        return Promise.resolve({ ok: false, error: "Salesforceのメールアドレスを取得できませんでした。" });
+      }
+      return AppSF.createRequest(profile).then(
+        function (r) {
+          return { ok: true, duplicate: !!r.duplicate };
         },
         function (e) {
           return { ok: false, error: e.message };
@@ -219,117 +290,187 @@
       );
     }
 
-    // Salesforceでログインした人を、メールアドレスでこのアプリの利用者と照合してログインする。
-    // Salesforceのアカウントがあっても、このアプリに登録されていない人はログインできない。
-    function loginWithSalesforce(profile) {
-      var key = String(profile.email || "").trim().toLowerCase();
-      var user =
-        key &&
-        users.find(function (u) {
-          return (u.email || "").toLowerCase() === key;
+    var isAdmin = !!(currentUser && currentUser.role === "admin" && currentUser.status === "active");
+
+    // 投稿に、CaseShelfの利用者（投稿者）を対応させる。サンプル投稿を後ろに付ける。
+    var projects = React.useMemo(
+      function () {
+        var byEmail = {};
+        users.forEach(function (u) {
+          byEmail[lower(u.email)] = u;
         });
-      if (!user) {
-        return {
-          ok: false,
-          error: "notRegistered",
-          profile: profile,
-        };
-      }
-      if (user.status === "suspended") {
-        return { ok: false, error: "このアカウントは利用停止されています。管理者にお問い合わせください。" };
-      }
-      login(user.id);
-      return { ok: true };
+        return posts
+          .map(function (p) {
+            var u = byEmail[lower(p.authorEmail)];
+            return Object.assign({}, p, { authorId: u ? u.id : null });
+          })
+          .concat(AppData.sampleProjects());
+      },
+      [posts, users]
+    );
+
+    // 投稿者の表示用情報（登録が無い場合はSalesforceの名前、サンプルは「サンプル」）
+    function authorOf(project) {
+      var u =
+        project.authorId &&
+        users.find(function (x) {
+          return x.id === project.authorId;
+        });
+      return u || { displayName: project.authorName || "不明な利用者", email: project.authorEmail || "" };
     }
 
-    // ログイン中の管理者の緊急用パスワードを設定・変更する。
-    // まだ設定していない場合は、現在のパスワードなしで設定できる。
-    function changePassword(currentPassword, newPassword) {
-      if (!currentUser) return Promise.resolve({ ok: false, error: "ログインしていません。" });
-      var me = currentUser;
-      if (me.role !== "admin") return Promise.resolve({ ok: false, error: "緊急用パスワードは管理者のみ設定できます。" });
-      var check = me.passwordHash ? AppData.hashPassword(me.id, currentPassword) : Promise.resolve(null);
-      return check.then(function (hash) {
-        if (me.passwordHash && hash !== me.passwordHash) return { ok: false, error: "現在のパスワードが正しくありません。" };
-        return AppData.hashPassword(me.id, newPassword).then(function (newHash) {
-          setUsers(function (prev) {
-            return prev.map(function (u) {
-              return u.id === me.id ? Object.assign({}, u, { passwordHash: newHash }) : u;
-            });
-          });
-          return { ok: true };
-        });
-      });
+    function canEdit(project) {
+      if (!currentUser || !project || project.isSample) return false;
+      var mySfId = profileRef.current && profileRef.current.sfUserId;
+      return project.authorId === currentUser.id || (!!mySfId && project.createdById === mySfId) || isAdmin;
     }
 
+    function wrap(promise) {
+      return promise.then(
+        function (v) {
+          return { ok: true, value: v };
+        },
+        function (e) {
+          return { ok: false, error: e.message };
+        }
+      );
+    }
+
+    // payload.photos: [{ id, size, dataUrl? }]
     function addProject(payload) {
-      var now = new Date().toISOString();
-      var project = Object.assign({}, payload, {
-        id: AppData.uid("proj"),
-        authorId: currentUser.id,
-        createdAt: now,
-        updatedAt: now,
-      });
-      setProjects(function (prev) {
-        return prev.concat([project]);
-      });
-      return project;
+      return wrap(
+        AppSF.createPost(payload).then(function (id) {
+          return reloadPosts().then(function () {
+            return { id: id };
+          });
+        })
+      );
     }
 
-    function updateProject(id, patch) {
-      setProjects(function (prev) {
-        return prev.map(function (p) {
-          return p.id === id ? Object.assign({}, p, patch, { updatedAt: new Date().toISOString() }) : p;
-        });
-      });
+    function updateProject(id, payload, removedPhotoIds) {
+      return wrap(
+        AppSF.updatePost(id, payload, removedPhotoIds).then(function () {
+          return reloadPosts();
+        })
+      );
     }
 
     function deleteProject(id) {
-      setProjects(function (prev) {
-        return prev.filter(function (p) {
-          return p.id !== id;
-        });
+      var p = posts.find(function (x) {
+        return x.id === id;
       });
-      setSaves(function (prev) {
-        var next = {};
-        Object.keys(prev).forEach(function (uid) {
-          next[uid] = prev[uid].filter(function (pid) {
-            return pid !== id;
-          });
-        });
-        return next;
+      var photoIds = p
+        ? p.photos.map(function (ph) {
+            return ph.id;
+          })
+        : [];
+      var mine = saves.filter(function (s) {
+        return s.postId === id;
       });
+      return wrap(
+        Promise.all(
+          mine.map(function (s) {
+            return AppSF.removeSave(s.id).catch(function () {});
+          })
+        )
+          .then(function () {
+            return AppSF.deletePost(id, photoIds);
+          })
+          .then(function () {
+            setPosts(function (prev) {
+              return prev.filter(function (x) {
+                return x.id !== id;
+              });
+            });
+            setSaves(function (prev) {
+              return prev.filter(function (s) {
+                return s.postId !== id;
+              });
+            });
+          })
+      );
     }
 
+    var savedIds = saves
+      .map(function (s) {
+        return s.postId;
+      })
+      .filter(Boolean);
+
     function isSaved(projectId) {
-      if (!currentUser) return false;
-      var list = saves[currentUser.id] || [];
-      return list.indexOf(projectId) !== -1;
+      return savedIds.indexOf(projectId) !== -1;
     }
 
     function toggleSave(projectId) {
-      if (!currentUser) return;
+      var existing = saves.find(function (s) {
+        return s.postId === projectId;
+      });
+      if (existing) {
+        setSaves(function (prev) {
+          return prev.filter(function (s) {
+            return s.id !== existing.id;
+          });
+        });
+        return AppSF.removeSave(existing.id).catch(function (e) {
+          setSaves(function (prev) {
+            return prev.concat([existing]);
+          });
+          toast(e.message, "error");
+        });
+      }
+      var tmp = { id: AppData.uid("tmp"), postId: projectId };
       setSaves(function (prev) {
-        var list = prev[currentUser.id] || [];
-        var exists = list.indexOf(projectId) !== -1;
-        var nextList = exists
-          ? list.filter(function (id) {
-              return id !== projectId;
-            })
-          : list.concat([projectId]);
-        var next = Object.assign({}, prev);
-        next[currentUser.id] = nextList;
-        return next;
+        return prev.concat([tmp]);
+      });
+      return AppSF.addSave(projectId).then(
+        function (id) {
+          setSaves(function (prev) {
+            return prev.map(function (s) {
+              return s.id === tmp.id ? { id: id, postId: projectId } : s;
+            });
+          });
+        },
+        function (e) {
+          setSaves(function (prev) {
+            return prev.filter(function (s) {
+              return s.id !== tmp.id;
+            });
+          });
+          toast(e.message, "error");
+        }
+      );
+    }
+
+    function patchUserLocal(userId, patch) {
+      setUsers(function (prev) {
+        return prev.map(function (u) {
+          return u.id === userId ? Object.assign({}, u, patch) : u;
+        });
+      });
+      setCurrentUser(function (me) {
+        return me && me.id === userId ? Object.assign({}, me, patch) : me;
       });
     }
 
+    // patch: { displayName } または { avatarDataUrl }
     function updateProfile(patch) {
-      if (!currentUser) return;
-      setUsers(function (prev) {
-        return prev.map(function (u) {
-          return u.id === currentUser.id ? Object.assign({}, u, patch) : u;
-        });
-      });
+      if (!currentUser) return Promise.resolve({ ok: false, error: "ログインしていません。" });
+      var me = currentUser;
+      if (patch.avatarDataUrl) {
+        return wrap(
+          AppSF.uploadImage(patch.avatarDataUrl, me.id, "CaseShelfプロフィール画像").then(function (vid) {
+            return AppSF.updateUser(me.id, { avatarVersionId: vid }).then(function () {
+              patchUserLocal(me.id, { avatarVersionId: vid });
+              if (me.avatarVersionId) AppSF.deleteFiles([me.avatarVersionId]);
+            });
+          })
+        );
+      }
+      return wrap(
+        AppSF.updateUser(me.id, { displayName: patch.displayName }).then(function () {
+          patchUserLocal(me.id, { displayName: patch.displayName });
+        })
+      );
     }
 
     var allTags = (function () {
@@ -347,37 +488,32 @@
       return out;
     })();
 
+    var pendingRequests = requests.filter(function (r) {
+      return r.status === "pending";
+    });
+
     var admin = {
       // 利用者を追加する。Salesforceでログインするため、メールアドレス（=Salesforceのメールアドレス）で登録する。
-      // Promise で { ok, error } を返す。
+      // Promise で { ok, error, user } を返す。
       inviteUser: function (data) {
-        if (findByLoginId(data.email)) {
-          return Promise.resolve({ ok: false, error: "そのメールアドレスは既に登録されています。" });
-        }
-        var user = {
-          id: AppData.uid("u"),
-          loginId: data.email,
-          email: data.email,
-          displayName: data.displayName,
-          role: data.role === "admin" ? "admin" : "member",
-          status: "active",
-          avatarImage: null,
-        };
-        setUsers(function (prev) {
-          return prev.concat([user]);
+        var dup = users.some(function (u) {
+          return lower(u.email) === lower(data.email);
         });
-        return Promise.resolve({ ok: true, user: user });
-      },
-      // 管理者がパスワードを再設定する（利用者がパスワードを忘れた場合など）。
-      resetPassword: function (userId, newPassword) {
-        return AppData.hashPassword(userId, newPassword).then(function (hash) {
-          setUsers(function (prev) {
-            return prev.map(function (u) {
-              return u.id === userId ? Object.assign({}, u, { passwordHash: hash }) : u;
+        if (dup) return Promise.resolve({ ok: false, error: "そのメールアドレスは既に登録されています。" });
+        return AppSF.createUser(data).then(
+          function (user) {
+            setUsers(function (prev) {
+              return prev.concat([user]);
             });
-          });
-          return { ok: true };
-        });
+            return { ok: true, user: user };
+          },
+          function (e) {
+            return {
+              ok: false,
+              error: e.code === "DUPLICATE_VALUE" ? "そのメールアドレスは既に登録されています。" : e.message,
+            };
+          }
+        );
       },
       // 依頼を承認して利用者として登録する
       approveRequest: function (reqId, role) {
@@ -389,54 +525,81 @@
           .inviteUser({ email: req.email, displayName: req.name || req.email, role: role })
           .then(function (res) {
             if (!res.ok) return res;
-            setRequests(function (prev) {
-              return prev.map(function (r) {
-                return r.id === reqId ? Object.assign({}, r, { status: "approved", handledAt: new Date().toISOString() }) : r;
-              });
-            });
-            return res;
+            return AppSF.setRequestStatus(reqId, "approved").then(
+              function () {
+                setRequests(function (prev) {
+                  return prev.filter(function (r) {
+                    return r.id !== reqId;
+                  });
+                });
+                return res;
+              },
+              function () {
+                return res;
+              }
+            );
           });
       },
       declineRequest: function (reqId) {
-        setRequests(function (prev) {
-          return prev.map(function (r) {
-            return r.id === reqId ? Object.assign({}, r, { status: "declined", handledAt: new Date().toISOString() }) : r;
-          });
-        });
+        return wrap(
+          AppSF.setRequestStatus(reqId, "declined").then(function () {
+            setRequests(function (prev) {
+              return prev.filter(function (r) {
+                return r.id !== reqId;
+              });
+            });
+          })
+        );
       },
       setUserStatus: function (userId, status) {
-        setUsers(function (prev) {
-          return prev.map(function (u) {
-            return u.id === userId ? Object.assign({}, u, { status: status }) : u;
-          });
-        });
+        return wrap(
+          AppSF.updateUser(userId, { status: status }).then(function () {
+            patchUserLocal(userId, { status: status });
+          })
+        );
       },
       deleteTagGlobally: function (tag) {
         var key = AppUtils.tagKey(tag);
-        setProjects(function (prev) {
-          return prev.map(function (p) {
-            return Object.assign({}, p, {
-              tags: p.tags.filter(function (t) {
-                return AppUtils.tagKey(t) !== key;
-              }),
-            });
+        var targets = posts.filter(function (p) {
+          return p.tags.some(function (t) {
+            return AppUtils.tagKey(t) === key;
           });
         });
+        return wrap(
+          targets
+            .reduce(function (chain, p) {
+              return chain.then(function () {
+                return AppSF.updatePostTags(
+                  p.id,
+                  p.tags.filter(function (t) {
+                    return AppUtils.tagKey(t) !== key;
+                  })
+                );
+              });
+            }, Promise.resolve())
+            .then(function () {
+              return reloadPosts();
+            })
+        );
       },
     };
 
     return {
+      phase: phase,
+      loadError: loadError,
+      loginMessage: loginMessage,
       users: users,
       projects: projects,
-      saves: saves,
+      savedIds: savedIds,
       currentUser: currentUser,
       isAdmin: isAdmin,
-      authenticate: authenticate,
+      authorOf: authorOf,
+      canEdit: canEdit,
       loginWithSalesforce: loginWithSalesforce,
       requestAccount: requestAccount,
       pendingRequests: pendingRequests,
-      changePassword: changePassword,
       logout: logout,
+      refresh: refresh,
       addProject: addProject,
       updateProject: updateProject,
       deleteProject: deleteProject,
@@ -458,16 +621,16 @@
     var store = useStore(toast);
     var route = matchRoute(router.pathname);
 
-    // --- アクセス制御（試作品: ローカル状態のみでの疑似実装） ---
+    // --- アクセス制御 ---
     useEffect(
       function () {
+        if (store.phase === "loading" || store.phase === "error") return;
         if (!store.currentUser) {
           if (route.name !== "login") router.navigate("/login", { replace: true });
           return;
         }
         if (store.currentUser.status === "suspended") {
-          toast("アカウントが停止されているため、ログアウトしました。", "error");
-          store.logout();
+          store.logout("アカウントが停止されているため、ログアウトしました。");
           router.navigate("/login", { replace: true });
           return;
         }
@@ -481,8 +644,41 @@
           return;
         }
       },
-      [store.currentUser && store.currentUser.id, store.currentUser && store.currentUser.status, route.name, route.params.id]
+      [store.phase, store.currentUser && store.currentUser.id, store.currentUser && store.currentUser.status, route.name, route.params.id]
     );
+
+    if (store.phase === "loading") {
+      return h("div", { className: "center-loading" }, "Salesforceからデータを読み込み中...");
+    }
+    if (store.phase === "error") {
+      return h(
+        "div",
+        { className: "center-loading load-error" },
+        h("p", null, "データを読み込めませんでした。"),
+        h("p", { className: "load-error-detail" }, store.loadError),
+        h(
+          "button",
+          {
+            className: "btn",
+            onClick: function () {
+              window.location.reload();
+            },
+          },
+          "再読み込み"
+        ),
+        h(
+          "button",
+          {
+            className: "btn ghost",
+            onClick: function () {
+              store.logout();
+              router.navigate("/login", { replace: true });
+            },
+          },
+          "ログアウト"
+        )
+      );
+    }
 
     if (!store.currentUser) {
       if (route.name !== "login") {
@@ -564,7 +760,7 @@
         pendingCount: store.isAdmin ? store.pendingRequests.length : 0,
         right: h(
           "div",
-          { style: { display: "flex", alignItems: "center", gap: 8 } },
+          { style: { display: "flex", alignItems: "center", gap: "0.5rem" } },
           h(
             "button",
             {

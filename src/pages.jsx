@@ -12,14 +12,6 @@ window.AppPages = (function () {
   // ====================================================================
   // Login
   // ====================================================================
-  var MIN_PASSWORD_LENGTH = 8;
-  function validateNewPassword(pw) {
-    if (!pw || pw.length < MIN_PASSWORD_LENGTH) {
-      return "パスワードは" + MIN_PASSWORD_LENGTH + "文字以上で入力してください。";
-    }
-    return null;
-  }
-
   // Salesforceのロゴではなく、雲の形の簡単なマーク
   function SalesforceMark() {
     return h(
@@ -53,6 +45,56 @@ window.AppPages = (function () {
     return { to: to, href: "mailto:" + to + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body) };
   }
 
+  // 登録した本人へ送る「登録完了」メール（件名・本文）。
+  // サーバーを持たない構成のため、メールソフト（Outlook等）で作成して管理者が送信する。
+  function appLoginUrl() {
+    return window.AppSSO ? AppSSO.redirectUri() : window.location.origin + window.location.pathname;
+  }
+  function registeredMailHref(user) {
+    var loginUrl = appLoginUrl();
+    var subject = "【CaseShelf】CaseShelfアカウント登録完了";
+    var body = [
+      (user.displayName || user.email) + " 様",
+      "",
+      "CaseShelfアカウント登録完了",
+      "",
+      "CaseShelfのアカウント登録が完了しました。",
+      "下記のURLを開き、「Salesforceでログイン」からログインしてください。",
+      "",
+      "CaseShelfログインURL",
+      loginUrl,
+      "",
+      "登録メールアドレス: " + user.email,
+      "※ログインには、上記メールアドレスのSalesforceアカウントを使用します。",
+    ].join("\n");
+    return {
+      to: user.email,
+      href: "mailto:" + encodeURIComponent(user.email) + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body),
+    };
+  }
+
+  // 登録直後に表示する「登録完了メールを作成する」パネル
+  function RegisteredMailNotice(props) {
+    var user = props.user;
+    var mail = registeredMailHref(user);
+    return h(
+      "div",
+      { className: "registered-notice", role: "status" },
+      h(
+        "p",
+        null,
+        "「" + (user.displayName || user.email) + "」（" + user.email + "）を登録しました。本人に登録完了メールを送ってください。"
+      ),
+      h(
+        "div",
+        { className: "registered-actions" },
+        h("a", { className: "btn primary sm", href: mail.href }, "登録完了メールを作成する"),
+        h("button", { type: "button", className: "btn ghost sm", onClick: props.onClose }, "閉じる")
+      ),
+      h("p", { className: "form-hint" }, "メールソフトが開き、件名「【CaseShelf】CaseShelfアカウント登録完了」とログインURL入りの本文が作成されます。内容を確認して送信してください。")
+    );
+  }
+
   function RequestAccountCard(props) {
     var p = props.profile;
     var mail = requestMailHref(p);
@@ -77,7 +119,11 @@ window.AppPages = (function () {
             "Salesforceでの本人確認はできました。CaseShelfを使うには、管理者による利用登録が必要です。"
           ),
           props.error && h("div", { className: "login-error", role: "alert" }, props.error),
-          h("button", { type: "button", className: "btn primary block", onClick: props.onRequest }, "管理者に利用登録を依頼する")
+          h(
+            "button",
+            { type: "button", className: "btn primary block", onClick: props.onRequest, disabled: props.busy },
+            props.busy ? "送信中..." : "管理者に利用登録を依頼する"
+          )
         ),
       done &&
         h(
@@ -109,21 +155,9 @@ window.AppPages = (function () {
 
   function LoginPage(props) {
     var store = props.store;
-    var _id = useState("");
-    var loginId = _id[0],
-      setLoginId = _id[1];
-    var _pw = useState("");
-    var password = _pw[0],
-      setPassword = _pw[1];
     var _err = useState(null);
     var error = _err[0],
       setError = _err[1];
-    var _busy = useState(false);
-    var busy = _busy[0],
-      setBusy = _busy[1];
-    var _show = useState(false);
-    var showPw = _show[0],
-      setShowPw = _show[1];
     var _sf = useState(false);
     var sfBusy = _sf[0],
       setSfBusy = _sf[1];
@@ -133,34 +167,37 @@ window.AppPages = (function () {
     var _rq = useState(null); // 依頼の結果
     var requestResult = _rq[0],
       setRequestResult = _rq[1];
-    var _fb = useState(false);
-    var showFallback = _fb[0],
-      setShowFallback = _fb[1];
+    var _rb = useState(false);
+    var requestBusy = _rb[0],
+      setRequestBusy = _rb[1];
 
     // Salesforceから戻ってきた場合の処理
     useEffect(function () {
       var cancelled = false;
       var pending = AppSSO.consumeRedirect();
-      pending.then(
-        function (profile) {
+      pending
+        .then(function (profile) {
           if (cancelled || !profile) return;
           setSfBusy(true);
-          var res = store.loginWithSalesforce(profile);
-          setSfBusy(false);
-          if (!res.ok) {
-            if (res.error === "notRegistered") {
-              setNotRegistered(res.profile);
+          return store.loginWithSalesforce(profile).then(function (res) {
+            if (cancelled) return;
+            setSfBusy(false);
+            if (!res.ok) {
+              if (res.error === "notRegistered") {
+                setNotRegistered(res.profile);
+                return;
+              }
+              setError(res.error);
               return;
             }
-            setError(res.error);
-            return;
-          }
-          props.route.navigate("/feed", { replace: true });
-        },
-        function (e) {
-          if (!cancelled) setError(e.message);
-        }
-      );
+            props.route.navigate("/feed", { replace: true });
+          });
+        })
+        .catch(function (e) {
+          if (cancelled) return;
+          setSfBusy(false);
+          setError(e.message);
+        });
       // 通信中は「確認中」を表示する
       if (new URLSearchParams(window.location.search).get("code")) setSfBusy(true);
       return function () {
@@ -177,32 +214,17 @@ window.AppPages = (function () {
       });
     }
 
-    function submit(e) {
-      e.preventDefault();
-      if (!loginId.trim() || !password) {
-        setError("ユーザIDとパスワードを入力してください。");
-        return;
-      }
-      setBusy(true);
+    function sendRequest() {
+      setRequestBusy(true);
       setError(null);
-      store.authenticate(loginId, password).then(function (res) {
-        setBusy(false);
+      store.requestAccount(notRegistered).then(function (res) {
+        setRequestBusy(false);
         if (!res.ok) {
           setError(res.error);
-          setPassword("");
           return;
         }
-        props.route.navigate("/feed", { replace: true });
+        setRequestResult(res.duplicate ? "duplicate" : "created");
       });
-    }
-
-    function sendRequest() {
-      var res = store.requestAccount(notRegistered);
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      setRequestResult(res.duplicate ? "duplicate" : "created");
     }
 
     var logo = h(
@@ -222,8 +244,10 @@ window.AppPages = (function () {
           profile: notRegistered,
           result: requestResult,
           error: error,
+          busy: requestBusy,
           onRequest: sendRequest,
           onBack: function () {
+            AppSSO.endSession();
             setNotRegistered(null);
             setRequestResult(null);
             setError(null);
@@ -232,122 +256,28 @@ window.AppPages = (function () {
       );
     }
 
+    var message = error || store.loginMessage;
     return h(
       "div",
       { className: "login-screen" },
-      h(
-        "div",
-        { className: "login-logo" },
-        h(C.Logo, { size: 40 }),
-        h("div", { className: "name" }, "CaseShelf"),
-        h("div", { className: "tagline" }, "社内事例写真を、探しやすく。")
-      ),
+      logo,
       h(
         "div",
         { className: "login-card" },
         h("h2", null, "ログイン"),
         h(
           "button",
-          { type: "button", className: "btn block sf-login", onClick: startSalesforce, disabled: sfBusy || busy },
+          { type: "button", className: "btn block sf-login", onClick: startSalesforce, disabled: sfBusy },
           h(SalesforceMark, null),
           sfBusy ? "Salesforceで確認中..." : "Salesforceでログイン"
         ),
         h("p", { className: "login-help" }, "会社のSalesforceアカウントでログインします。"),
-        !showFallback && error && h("div", { className: "login-error login-error-top", role: "alert" }, error)
+        message && h("div", { className: "login-error login-error-top", role: "alert" }, message)
       ),
-      showFallback
-        ? h(
-            "form",
-            { className: "login-card fallback-card", onSubmit: submit, noValidate: true },
-            h("h2", null, "管理者の緊急用ログイン"),
-            h(
-              "p",
-              { className: "fallback-note" },
-              "Salesforceにログインできないときに、管理者だけが使えます。"
-            ),
-            h(
-              "div",
-              { className: "field" },
-              h("label", { htmlFor: "login-id" }, "ユーザID（メールアドレス）"),
-              h("input", {
-                id: "login-id",
-                className: "text-input",
-                autoComplete: "username",
-                autoCapitalize: "none",
-                value: loginId,
-                onChange: function (e) {
-                  setLoginId(e.target.value);
-                },
-                autoFocus: true,
-              })
-            ),
-            h(
-              "div",
-              { className: "field" },
-              h("label", { htmlFor: "login-pw" }, "緊急用パスワード"),
-              h(
-                "div",
-                { className: "password-row" },
-                h("input", {
-                  id: "login-pw",
-                  className: "text-input",
-                  type: showPw ? "text" : "password",
-                  autoComplete: "current-password",
-                  value: password,
-                  onChange: function (e) {
-                    setPassword(e.target.value);
-                  },
-                }),
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    className: "btn ghost sm",
-                    onClick: function () {
-                      setShowPw(!showPw);
-                    },
-                  },
-                  showPw ? "隠す" : "表示"
-                )
-              )
-            ),
-            error && h("div", { className: "login-error", role: "alert" }, error),
-            h(
-              "button",
-              { className: "btn primary block", type: "submit", disabled: busy },
-              busy ? "確認中..." : "ログイン"
-            ),
-            h(
-              "button",
-              {
-                type: "button",
-                className: "link-button",
-                onClick: function () {
-                  setShowFallback(false);
-                  setError(null);
-                  setPassword("");
-                },
-              },
-              "閉じる"
-            )
-          )
-        : h(
-            "button",
-            {
-              type: "button",
-              id: "open-fallback",
-              className: "link-button",
-              onClick: function () {
-                setShowFallback(true);
-                setError(null);
-              },
-            },
-            "管理者の緊急用ログイン"
-          ),
       h(
         "p",
         { className: "login-note" },
-        "CaseShelfを使うには、管理者による利用者登録が必要です。※試作品のため、データはこの端末のブラウザ内にのみ保存されます。"
+        "CaseShelfを使うには、管理者による利用者登録が必要です。投稿した内容は、CaseShelfの利用者全員が閲覧できます。"
       )
     );
   }
@@ -614,10 +544,8 @@ window.AppPages = (function () {
 
     var photos = project.photos;
     var total = photos.length;
-    var author = store.users.find(function (u) {
-      return u.id === project.authorId;
-    });
-    var canEdit = store.currentUser && (store.currentUser.id === project.authorId || store.isAdmin);
+    var author = store.authorOf(project);
+    var canEdit = store.canEdit(project);
     var saved = store.isSaved(project.id);
 
     function go(delta) {
@@ -649,10 +577,15 @@ window.AppPages = (function () {
     };
 
     function handleDelete() {
-      store.deleteProject(project.id);
       setConfirmOpen(false);
-      store.toast("案件を削除しました。", "success");
-      route.navigate("/feed", { replace: true });
+      store.deleteProject(project.id).then(function (res) {
+        if (!res.ok) {
+          store.toast(res.error, "error");
+          return;
+        }
+        store.toast("案件を削除しました。", "success");
+        route.navigate("/feed", { replace: true });
+      });
     }
 
     return h(
@@ -673,7 +606,7 @@ window.AppPages = (function () {
             return h(
               "div",
               { className: "slide", key: ph.id },
-              h("img", { src: ph.url, alt: project.title })
+              h(C.Photo, { photo: ph, alt: project.title })
             );
           })
         ),
@@ -700,24 +633,28 @@ window.AppPages = (function () {
           "div",
           { className: "detail-header" },
           h("h1", { className: "detail-title" }, project.title),
-          h(
-            "button",
-            {
-              className: cx("btn", saved ? "primary" : "ghost", "sm"),
-              onClick: function () {
-                store.toggleSave(project.id);
-              },
-            },
-            saved ? "★ 保存済み" : "☆ 保存"
-          )
+          project.isSample
+            ? h("span", { className: "sample-badge" }, "サンプル")
+            : h(
+                "button",
+                {
+                  className: cx("btn", saved ? "primary" : "ghost", "sm"),
+                  onClick: function () {
+                    store.toggleSave(project.id);
+                  },
+                },
+                saved ? "★ 保存済み" : "☆ 保存"
+              )
         ),
         h(
           "div",
           { className: "detail-author-row" },
-          h(C.Avatar, { user: author || { displayName: "不明な利用者" }, size: "sm" }),
-          h("span", null, author ? author.displayName : "不明な利用者"),
+          h(C.Avatar, { user: author, size: "sm" }),
+          h("span", null, author.displayName),
           h("span", null, "·"),
-          h("span", null, AppUtils.formatDateTime(project.createdAt))
+          h("span", null, AppUtils.formatDateTime(project.createdAt)),
+          project.propertyNo ? h("span", null, "·") : null,
+          project.propertyNo ? h("span", null, "物件No " + project.propertyNo) : null
         ),
         h(
           "div",
@@ -795,6 +732,18 @@ window.AppPages = (function () {
     return "";
   }
 
+  // 写真の元ファイルの容量（バイト）。以前の投稿で記録が無い場合は、保存データの大きさから見積もる。
+  function photoOriginalSize(p) {
+    if (typeof p.size === "number") return p.size;
+    if (p.url && p.url.indexOf("data:") === 0) return Math.round(p.url.length * 0.75);
+    return 0;
+  }
+  function totalPhotoSize(list) {
+    return list.reduce(function (sum, p) {
+      return p.status === "error" ? sum : sum + (p.size || 0);
+    }, 0);
+  }
+
   function PostFormPage(props) {
     var store = props.store;
     var route = props.route;
@@ -806,9 +755,10 @@ window.AppPages = (function () {
       : null;
 
     var isEdit = !!editId;
-    var notAllowed =
-      isEdit &&
-      (!existing || (store.currentUser && existing.authorId !== store.currentUser.id && !store.isAdmin));
+    var notAllowed = isEdit && (!existing || !store.canEdit(existing));
+    var _saving = useState(false);
+    var saving = _saving[0],
+      setSaving = _saving[1];
 
     var _title = useState(existing ? existing.title : "");
     var title = _title[0],
@@ -819,13 +769,21 @@ window.AppPages = (function () {
     var _sfdc = useState(existing ? existing.salesforceUrl : "");
     var sfdc = _sfdc[0],
       setSfdc = _sfdc[1];
+    var _propNo = useState(existing ? existing.propertyNo || "" : "");
+    var propNo = _propNo[0],
+      setPropNo = _propNo[1];
+    // 物件Noでの検索の状態: { state: "idle" | "searching" | "found" | "notFound" | "error", message }
+    var _sfSearch = useState({ state: "idle", message: "" });
+    var sfSearch = _sfSearch[0],
+      setSfSearch = _sfSearch[1];
+    var searchSeqRef = useRef(0);
     var _tags = useState(existing ? existing.tags.slice() : []);
     var tags = _tags[0],
       setTags = _tags[1];
     var _photos = useState(
       existing
         ? existing.photos.map(function (p) {
-            return { id: p.id, url: p.url, status: "done" };
+            return { id: p.id, status: "done", size: photoOriginalSize(p) };
           })
         : []
     );
@@ -862,29 +820,38 @@ window.AppPages = (function () {
       var files = Array.prototype.slice.call(fileList || []);
       if (!files.length) return;
       var limits = AppData.LIMITS;
-      var currentCount = photos.length;
-      files.forEach(function (file, i) {
-        if (currentCount + i >= limits.maxPhotosPerProject) {
-          store.toast(
-            "写真は案件あたり最大" + limits.maxPhotosPerProject + "枚までです（試作品の上限案）。",
-            "error"
-          );
+      var maxBytes = limits.maxProjectSizeMB * 1024 * 1024;
+      // 選択した写真を順に受け付け、枚数・合計容量の上限を超えるものは受け付けない
+      var count = photos.filter(function (p) {
+        return p.status !== "error";
+      }).length;
+      var total = totalPhotoSize(photos);
+      var countErrorShown = false;
+      files.forEach(function (file) {
+        if (count >= limits.maxPhotosPerProject) {
+          if (!countErrorShown) {
+            store.toast("写真は1投稿あたり最大" + limits.maxPhotosPerProject + "枚までです。", "error");
+            countErrorShown = true;
+          }
           return;
         }
         if (limits.acceptedTypes.indexOf(file.type) === -1) {
           store.toast("「" + file.name + "」は対応していない形式です（JPEG/PNG/WEBP/GIFのみ）。", "error");
           return;
         }
-        if (file.size > limits.maxPhotoSizeMB * 1024 * 1024) {
+        if (total + file.size > maxBytes) {
           store.toast(
-            "「" + file.name + "」は" + limits.maxPhotoSizeMB + "MBを超えています（試作品の上限案）。",
+            "「" + file.name + "」（" + AppUtils.formatMB(file.size) + "）を追加すると、1投稿あたりの上限" +
+              limits.maxProjectSizeMB + "MBを超えます（現在の合計 " + AppUtils.formatMB(total) + "）。",
             "error"
           );
           return;
         }
+        count++;
+        total += file.size;
         var localId = AppData.uid("tmp");
         setPhotos(function (prev) {
-          return prev.concat([{ id: localId, url: null, status: "uploading", progress: 0 }]);
+          return prev.concat([{ id: localId, url: null, status: "uploading", progress: 0, size: file.size }]);
         });
         var startedAt = Date.now();
         var interval = setInterval(function () {
@@ -897,7 +864,7 @@ window.AppPages = (function () {
             });
           });
         }, 80);
-        AppUtils.readFileAsDataURL(file)
+        AppUtils.compressImage(file, limits.storeMaxEdgePx, limits.storeJpegQuality)
           .then(function (dataUrl) {
             return AppUtils.wait(650).then(function () {
               return dataUrl;
@@ -908,7 +875,7 @@ window.AppPages = (function () {
             setPhotos(function (prev) {
               return prev.map(function (p) {
                 return p.id === localId
-                  ? { id: localId, url: dataUrl, status: "done" }
+                  ? { id: localId, url: dataUrl, status: "done", size: file.size }
                   : p;
               });
             });
@@ -950,6 +917,44 @@ window.AppPages = (function () {
       });
     }
 
+    // 物件NoでSalesforceの商談を検索し、案件名・Salesforce案件URLを自動入力する
+    function searchByPropertyNo() {
+      var no = propNo.trim();
+      if (!no) {
+        setSfSearch({ state: "error", message: "物件Noを入力してください。" });
+        return;
+      }
+      var seq = ++searchSeqRef.current;
+      setSfSearch({ state: "searching", message: "" });
+      AppSSO.searchOpportunityByPropertyNo(no).then(
+        function (opp) {
+          if (seq !== searchSeqRef.current) return;
+          if (!opp) {
+            setSfSearch({
+              state: "notFound",
+              message: "物件No「" + no + "」の商談が見つかりませんでした。物件Noを確認するか、案件名・URLを手入力してください。",
+            });
+            return;
+          }
+          setTitle(opp.name);
+          setSfdc(opp.url);
+          setErrors(function (prev) {
+            return Object.assign({}, prev, { title: null });
+          });
+          setSfSearch({
+            state: "found",
+            message:
+              "商談「" + opp.name + "」が見つかりました。案件名とSalesforce案件URLを入力しました。" +
+              (opp.multiple ? "（同じ物件Noの商談が複数あったため、1件目を使いました）" : ""),
+          });
+        },
+        function (e) {
+          if (seq !== searchSeqRef.current) return;
+          setSfSearch({ state: "error", message: e.message });
+        }
+      );
+    }
+
     function validate() {
       var errs = {};
       if (!title.trim()) errs.title = "案件名を入力してください。";
@@ -957,6 +962,10 @@ window.AppPages = (function () {
         return p.status === "done";
       });
       if (doneDonePhotos.length === 0) errs.photos = "写真を1枚以上登録してください。";
+      else if (doneDonePhotos.length > AppData.LIMITS.maxPhotosPerProject)
+        errs.photos = "写真は1投稿あたり最大" + AppData.LIMITS.maxPhotosPerProject + "枚までです。不要な写真を削除してください。";
+      else if (totalPhotoSize(doneDonePhotos) > AppData.LIMITS.maxProjectSizeMB * 1024 * 1024)
+        errs.photos = "写真の合計容量が" + AppData.LIMITS.maxProjectSizeMB + "MBを超えています。写真を減らしてください。";
       if (tags.length === 0) errs.tags = "ハッシュタグを1つ以上設定してください。";
       if (photos.some(function (p) { return p.status === "uploading"; })) {
         errs.uploading = "アップロード完了までお待ちください。";
@@ -971,12 +980,15 @@ window.AppPages = (function () {
         store.toast("入力内容をご確認ください。", "error");
         return;
       }
+      if (saving) return;
+      // 新しく追加した写真（仮ID "tmp_..."）は dataUrl を付けて渡し、保存時にSalesforceへ送る
       var finalPhotos = photos
         .filter(function (p) {
           return p.status === "done";
         })
-        .map(function (p, i) {
-          return { id: p.id, url: p.url, order: i };
+        .map(function (p) {
+          var isNew = String(p.id).indexOf("tmp_") === 0;
+          return isNew ? { id: p.id, size: p.size || 0, dataUrl: p.url } : { id: p.id, size: p.size || 0 };
         });
       var finalCoverId =
         finalPhotos.some(function (p) { return p.id === coverId; }) ? coverId : finalPhotos[0].id;
@@ -988,23 +1000,92 @@ window.AppPages = (function () {
         photos: finalPhotos,
         coverPhotoId: finalCoverId,
         salesforceUrl: sfdc.trim(),
+        propertyNo: propNo.trim(),
       };
 
+      setSaving(true);
       if (isEdit) {
-        store.updateProject(existing.id, payload);
-        store.toast("案件を更新しました。", "success");
-        route.navigate("/project/" + existing.id, { replace: true });
+        var keptIds = finalPhotos.map(function (p) {
+          return p.id;
+        });
+        var removedIds = existing.photos
+          .map(function (p) {
+            return p.id;
+          })
+          .filter(function (id) {
+            return keptIds.indexOf(id) === -1;
+          });
+        store.updateProject(existing.id, payload, removedIds).then(function (res) {
+          setSaving(false);
+          if (!res.ok) {
+            store.toast("保存できませんでした。" + res.error, "error");
+            return;
+          }
+          store.toast("案件を更新しました。", "success");
+          route.navigate("/project/" + existing.id, { replace: true });
+        });
       } else {
-        var created = store.addProject(payload);
-        store.toast("案件を投稿しました。", "success");
-        route.navigate("/project/" + created.id, { replace: true });
+        store.addProject(payload).then(function (res) {
+          setSaving(false);
+          if (!res.ok) {
+            store.toast("投稿できませんでした。" + res.error, "error");
+            return;
+          }
+          store.toast("案件を投稿しました。", "success");
+          route.navigate("/project/" + res.value.id, { replace: true });
+        });
       }
     }
 
     return h(
       "form",
       { className: "form-page", onSubmit: handleSubmit },
-      h("h1", { style: { fontSize: 18, margin: "6px 0 18px" } }, isEdit ? "案件を編集" : "案件を新規投稿"),
+      h("h1", { style: { fontSize: "1.125rem", margin: "0.375rem 0 1.125rem" } }, isEdit ? "案件を編集" : "案件を新規投稿"),
+
+      h(
+        "div",
+        { className: "field" },
+        h("label", { htmlFor: "post-property-no" }, "物件No"),
+        h(
+          "div",
+          { className: "propno-row" },
+          h("input", {
+            id: "post-property-no",
+            className: "text-input",
+            value: propNo,
+            autoFocus: !isEdit,
+            onChange: function (e) {
+              setPropNo(e.target.value);
+              if (sfSearch.state !== "searching") setSfSearch({ state: "idle", message: "" });
+            },
+            onKeyDown: function (e) {
+              // Enterで投稿せず、検索する
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                searchByPropertyNo();
+              }
+            },
+            placeholder: "例: 12345",
+          }),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "btn",
+              onClick: searchByPropertyNo,
+              disabled: sfSearch.state === "searching",
+            },
+            sfSearch.state === "searching" ? "検索中..." : "Salesforceで検索"
+          )
+        ),
+        sfSearch.message
+          ? h(
+              "div",
+              { className: sfSearch.state === "found" ? "propno-result found" : "error", role: "status" },
+              sfSearch.message
+            )
+          : h("div", { className: "hint" }, "物件Noを入力して検索すると、Salesforceの商談から案件名とSalesforce案件URLが自動で入力されます。")
+      ),
 
       h(
         "div",
@@ -1046,7 +1127,11 @@ window.AppPages = (function () {
             },
           },
           "タップして写真を選択 / PCではドラッグ＆ドロップ",
-          h("div", { className: "hint" }, "JPEG/PNG/WEBP/GIF・1枚" + AppData.LIMITS.maxPhotoSizeMB + "MBまで・最大" + AppData.LIMITS.maxPhotosPerProject + "枚（試作品の上限案）")
+          h(
+            "div",
+            { className: "hint" },
+            "JPEG/PNG/WEBP/GIF・最大" + AppData.LIMITS.maxPhotosPerProject + "枚・1投稿の合計" + AppData.LIMITS.maxProjectSizeMB + "MBまで"
+          )
         ),
         h("input", {
           ref: fileInputRef,
@@ -1067,8 +1152,8 @@ window.AppPages = (function () {
                 return h(
                   "div",
                   { key: p.id, className: cx("photo-edit-item", p.id === coverId && "cover") },
-                  p.url
-                    ? h("img", { src: p.url, alt: "写真" + (i + 1) })
+                  p.status === "done"
+                    ? h(C.Photo, { photo: p, alt: "写真" + (i + 1) })
                     : h("div", { style: { width: "100%", height: "100%", background: "#ddd" } }),
                   p.id === coverId ? h("span", { className: "cover-badge" }, "代表") : null,
                   h(
@@ -1076,7 +1161,7 @@ window.AppPages = (function () {
                     { className: "photo-overlay" },
                     h(
                       "div",
-                      { style: { display: "flex", gap: 3, justifyContent: "flex-end" } },
+                      { style: { display: "flex", gap: "0.1875rem", justifyContent: "flex-end" } },
                       h(
                         "button",
                         {
@@ -1091,7 +1176,7 @@ window.AppPages = (function () {
                     ),
                     h(
                       "div",
-                      { style: { display: "flex", gap: 3, justifyContent: "space-between" } },
+                      { style: { display: "flex", gap: "0.1875rem", justifyContent: "space-between" } },
                       h(
                         "button",
                         {
@@ -1145,6 +1230,14 @@ window.AppPages = (function () {
               })
             )
           : null,
+        photos.length
+          ? h(
+              "div",
+              { className: "hint photo-usage" },
+              photos.filter(function (p) { return p.status !== "error"; }).length + " / " + AppData.LIMITS.maxPhotosPerProject +
+                "枚・合計 " + AppUtils.formatMB(totalPhotoSize(photos)) + " / " + AppData.LIMITS.maxProjectSizeMB + "MB"
+            )
+          : null,
         errors.photos ? h("div", { className: "error" }, errors.photos) : null,
         errors.uploading ? h("div", { className: "error" }, errors.uploading) : null
       ),
@@ -1179,7 +1272,7 @@ window.AppPages = (function () {
       h(
         "div",
         { className: "field" },
-        h("label", null, "Salesforce案件URL（任意）"),
+        h("label", null, "Salesforce案件URL（任意・物件Noの検索で自動入力）"),
         h("input", {
           className: "text-input",
           value: sfdc,
@@ -1188,7 +1281,7 @@ window.AppPages = (function () {
           },
           placeholder: "https://...",
         }),
-        h("div", { className: "hint" }, "入力すると案件詳細に「Salesforceで案件を見る」ボタンが表示されます（自動連携は行わず、URLを開くだけです）。")
+        h("div", { className: "hint" }, "入力すると案件詳細に「Salesforceで案件を見る」ボタンが表示されます。")
       ),
 
       h(
@@ -1199,8 +1292,19 @@ window.AppPages = (function () {
           { className: "btn ghost block", href: isEdit ? "#/project/" + existing.id : "#/feed" },
           "キャンセル"
         ),
-        h("button", { type: "submit", className: "btn primary block" }, isEdit ? "更新する" : "投稿する")
-      )
+        h(
+          "button",
+          { type: "submit", className: "btn primary block", disabled: saving },
+          saving ? "保存中..." : isEdit ? "更新する" : "投稿する"
+        )
+      ),
+      saving
+        ? h(
+            "div",
+            { className: "saving-overlay", role: "status" },
+            h("div", { className: "saving-card" }, "Salesforceに保存しています...", h("br"), "（写真の送信に少し時間がかかります）")
+          )
+        : null
     );
   }
 
@@ -1209,7 +1313,7 @@ window.AppPages = (function () {
   // ====================================================================
   function SavedPage(props) {
     var store = props.store;
-    var savedIds = store.saves[store.currentUser.id] || [];
+    var savedIds = store.savedIds;
     var projects = sortNewestFirst(
       store.projects.filter(function (p) {
         return savedIds.indexOf(p.id) !== -1;
@@ -1240,7 +1344,7 @@ window.AppPages = (function () {
         return p.authorId === user.id;
       })
     );
-    var savedCount = (store.saves[user.id] || []).length;
+    var savedCount = store.savedIds.length;
 
     function onAvatarFile(e) {
       var file = e.target.files && e.target.files[0];
@@ -1250,10 +1354,19 @@ window.AppPages = (function () {
         store.toast("対応していない画像形式です。", "error");
         return;
       }
-      AppUtils.readFileAsDataURL(file).then(function (dataUrl) {
-        store.updateProfile({ avatarImage: dataUrl });
-        store.toast("プロフィール画像を更新しました。", "success");
-      });
+      AppUtils.compressImage(file, AppData.LIMITS.avatarMaxEdgePx, 0.85)
+        .then(function (dataUrl) {
+          return store.updateProfile({ avatarDataUrl: dataUrl });
+        })
+        .then(
+          function (res) {
+            if (!res.ok) store.toast(res.error, "error");
+            else store.toast("プロフィール画像を更新しました。", "success");
+          },
+          function () {
+            store.toast("画像を読み込めませんでした。", "error");
+          }
+        );
     }
 
     function saveName() {
@@ -1261,9 +1374,14 @@ window.AppPages = (function () {
         store.toast("表示名を入力してください。", "error");
         return;
       }
-      store.updateProfile({ displayName: name.trim() });
-      setEditing(false);
-      store.toast("表示名を更新しました。", "success");
+      store.updateProfile({ displayName: name.trim() }).then(function (res) {
+        if (!res.ok) {
+          store.toast(res.error, "error");
+          return;
+        }
+        setEditing(false);
+        store.toast("表示名を更新しました。", "success");
+      });
     }
 
     return h(
@@ -1296,7 +1414,7 @@ window.AppPages = (function () {
           editing
             ? h(
                 "div",
-                { style: { display: "flex", gap: 6 } },
+                { style: { display: "flex", gap: "0.375rem" } },
                 h("input", {
                   className: "text-input",
                   value: name,
@@ -1345,122 +1463,10 @@ window.AppPages = (function () {
         h("div", null, h("b", null, myProjects.length), " 件の投稿"),
         h("div", null, h("b", null, savedCount), " 件の保存")
       ),
-      user.role === "admin" && h(PasswordChangeForm, { store: store }),
       h(C.PhotoGrid, {
         projects: myProjects,
         emptyMessage: "まだ案件を投稿していません。",
       })
-    );
-  }
-
-  function PasswordChangeForm(props) {
-    var store = props.store;
-    var _open = useState(false);
-    var open = _open[0],
-      setOpen = _open[1];
-    var _cur = useState("");
-    var cur = _cur[0],
-      setCur = _cur[1];
-    var _next = useState("");
-    var next = _next[0],
-      setNext = _next[1];
-    var _conf = useState("");
-    var conf = _conf[0],
-      setConf = _conf[1];
-    var _err = useState(null);
-    var error = _err[0],
-      setError = _err[1];
-
-    function reset() {
-      setCur("");
-      setNext("");
-      setConf("");
-      setError(null);
-    }
-
-    function submit(e) {
-      e.preventDefault();
-      var pwErr = validateNewPassword(next);
-      var hasPw = !!store.currentUser.passwordHash;
-      if (hasPw && !cur) return setError("現在のパスワードを入力してください。");
-      if (pwErr) return setError(pwErr);
-      if (next !== conf) return setError("新しいパスワード（確認）が一致しません。");
-      if (next === cur) return setError("現在と異なるパスワードを入力してください。");
-      store.changePassword(cur, next).then(function (res) {
-        if (!res.ok) return setError(res.error);
-        reset();
-        setOpen(false);
-        store.toast("緊急用パスワードを保存しました。", "success");
-      });
-    }
-
-    if (!open) {
-      return h(
-        "div",
-        { className: "password-section" },
-        h(
-          "button",
-          {
-            type: "button",
-            className: "btn sm",
-            onClick: function () {
-              setOpen(true);
-            },
-          },
-          store.currentUser.passwordHash ? "緊急用パスワードを変更" : "緊急用パスワードを設定"
-        ),
-        h(
-          "span",
-          { className: "form-hint", style: { marginLeft: 8 } },
-          "Salesforceにログインできないときの管理者用"
-        )
-      );
-    }
-
-    function pwField(id, label, value, setter, ac) {
-      return h(
-        "div",
-        { className: "field" },
-        h("label", { htmlFor: id }, label),
-        h("input", {
-          id: id,
-          className: "text-input",
-          type: "password",
-          autoComplete: ac,
-          value: value,
-          onChange: function (e) {
-            setter(e.target.value);
-          },
-        })
-      );
-    }
-
-    return h(
-      "form",
-      { className: "password-section password-form", onSubmit: submit, noValidate: true },
-      h("h3", null, "緊急用パスワード"),
-      h("p", { className: "fallback-note" }, "Salesforceにログインできないときに、ログイン画面の「管理者の緊急用ログイン」で使います。"),
-      store.currentUser.passwordHash && pwField("pw-cur", "現在のパスワード", cur, setCur, "current-password"),
-      pwField("pw-new", "新しいパスワード（8文字以上）", next, setNext, "new-password"),
-      pwField("pw-conf", "新しいパスワード（確認）", conf, setConf, "new-password"),
-      error && h("div", { className: "login-error", role: "alert" }, error),
-      h(
-        "div",
-        { style: { display: "flex", gap: 8 } },
-        h("button", { className: "btn primary sm", type: "submit" }, "変更する"),
-        h(
-          "button",
-          {
-            className: "btn ghost sm",
-            type: "button",
-            onClick: function () {
-              reset();
-              setOpen(false);
-            },
-          },
-          "キャンセル"
-        )
-      )
     );
   }
 
@@ -1518,6 +1524,7 @@ window.AppPages = (function () {
                     res.ok ? "「" + r.email + "」を登録しました。Salesforceでログインできるようになります。" : res.error,
                     res.ok ? "success" : "error"
                   );
+                  if (res.ok && props.onRegistered) props.onRegistered(res.user);
                 });
               },
             },
@@ -1528,8 +1535,9 @@ window.AppPages = (function () {
             {
               className: "btn sm",
               onClick: function () {
-                store.admin.declineRequest(r.id);
-                store.toast("依頼を見送りにしました。", "success");
+                store.admin.declineRequest(r.id).then(function (res) {
+                  store.toast(res.ok ? "依頼を見送りにしました。" : res.error, res.ok ? "success" : "error");
+                });
               },
             },
             "見送る"
@@ -1563,7 +1571,7 @@ window.AppPages = (function () {
                 "tbody",
                 null,
                 list.map(function (r) {
-                  return h(RequestRow, { key: r.id, store: store, request: r });
+                  return h(RequestRow, { key: r.id, store: store, request: r, onRegistered: props.onRegistered });
                 })
               )
             )
@@ -1579,21 +1587,22 @@ window.AppPages = (function () {
     var _inviteName = useState("");
     var inviteName = _inviteName[0],
       setInviteName = _inviteName[1];
-    var _resetTarget = useState(null);
-    var resetTarget = _resetTarget[0],
-      setResetTarget = _resetTarget[1];
-    var _resetPw = useState("");
-    var resetPw = _resetPw[0],
-      setResetPw = _resetPw[1];
     var _inviteRole = useState("member");
     var inviteRole = _inviteRole[0],
       setInviteRole = _inviteRole[1];
     var _confirmTarget = useState(null);
     var confirmTarget = _confirmTarget[0],
       setConfirmTarget = _confirmTarget[1];
+    var _registered = useState(null); // 直前に登録した利用者（登録完了メールの作成用）
+    var registered = _registered[0],
+      setRegistered = _registered[1];
 
+    // サンプル投稿は管理の対象外
+    var realProjects = store.projects.filter(function (p) {
+      return !p.isSample;
+    });
     var tagCounts = {};
-    store.projects.forEach(function (p) {
+    realProjects.forEach(function (p) {
       p.tags.forEach(function (t) {
         var key = AppUtils.tagKey(t);
         if (!tagCounts[key]) tagCounts[key] = { label: t, count: 0 };
@@ -1629,37 +1638,36 @@ window.AppPages = (function () {
           setInviteEmail("");
           setInviteName("");
           setInviteRole("member");
+          setRegistered(res.user);
           store.toast("「" + email + "」を追加しました。Salesforceでログインできるようになります。", "success");
         });
     }
 
-    function handleResetPassword(e) {
-      e.preventDefault();
-      var pwErr = validateNewPassword(resetPw);
-      if (pwErr) {
-        store.toast(pwErr, "error");
-        return;
-      }
-      var target = resetTarget;
-      store.admin.resetPassword(target.id, resetPw).then(function () {
-        setResetTarget(null);
-        setResetPw("");
-        store.toast("「" + target.displayName + "」のパスワードを再設定しました。新しいパスワードを本人に伝えてください。", "success");
-      });
-    }
-
     function handleDeleteTag(tag) {
-      store.admin.deleteTagGlobally(tag);
       setConfirmTarget(null);
-      store.toast("タグ「" + tag + "」をすべての案件から削除しました。", "success");
+      store.admin.deleteTagGlobally(tag).then(function (res) {
+        store.toast(
+          res.ok ? "タグ「" + tag + "」をすべての案件から削除しました。" : res.error,
+          res.ok ? "success" : "error"
+        );
+      });
     }
 
     return h(
       "div",
       { className: "admin-section" },
-      h(C.ProtoBanner, null, "管理者画面（試作品）: 利用者の追加は実際のメール送信を行いません。すべてこの端末内のデータに対する操作です。"),
+      h(C.ProtoBanner, null, "管理者画面: 利用者・投稿のデータはSalesforceに保存されます。利用者を登録すると、本人宛ての登録完了メールをメールソフトで作成できます（自動送信はしません）。"),
 
-      h(RequestList, { store: store }),
+      registered
+        ? h(RegisteredMailNotice, {
+            user: registered,
+            onClose: function () {
+              setRegistered(null);
+            },
+          })
+        : null,
+
+      h(RequestList, { store: store, onRegistered: setRegistered }),
 
       h("h2", null, "利用者の登録・停止"),
       h(
@@ -1700,37 +1708,6 @@ window.AppPages = (function () {
           "メールアドレスは、その人がSalesforceに登録しているメールアドレスと同じものを入力してください。ログインはSalesforceで行うため、パスワードは不要です。"
         )
       ),
-      resetTarget &&
-        h(
-          "form",
-          { className: "inline-form reset-form", onSubmit: handleResetPassword },
-          h("label", { htmlFor: "reset-pw" }, "「" + resetTarget.displayName + "」の新しい緊急用パスワード"),
-          h("input", {
-            id: "reset-pw",
-            className: "text-input",
-            type: "text",
-            placeholder: "8文字以上",
-            autoComplete: "new-password",
-            value: resetPw,
-            autoFocus: true,
-            onChange: function (e) {
-              setResetPw(e.target.value);
-            },
-          }),
-          h("button", { className: "btn primary", type: "submit" }, "再設定する"),
-          h(
-            "button",
-            {
-              className: "btn ghost",
-              type: "button",
-              onClick: function () {
-                setResetTarget(null);
-                setResetPw("");
-              },
-            },
-            "キャンセル"
-          )
-        ),
       h(
         "table",
         { className: "admin-table" },
@@ -1773,29 +1750,17 @@ window.AppPages = (function () {
                     disabled: isSelf,
                     title: isSelf ? "自分自身は停止できません" : "",
                     onClick: function () {
-                      store.admin.setUserStatus(u.id, u.status === "active" ? "suspended" : "active");
-                      store.toast(
-                        u.status === "active" ? "利用を停止しました。" : "利用停止を解除しました。",
-                        "success"
-                      );
+                      var wasActive = u.status === "active";
+                      store.admin.setUserStatus(u.id, wasActive ? "suspended" : "active").then(function (res) {
+                        store.toast(
+                          !res.ok ? res.error : wasActive ? "利用を停止しました。" : "利用停止を解除しました。",
+                          res.ok ? "success" : "error"
+                        );
+                      });
                     },
                   },
                   u.status === "active" ? "停止する" : "復帰させる"
-                ),
-                u.role === "admin" && " ",
-                u.role === "admin" &&
-                  h(
-                    "button",
-                    {
-                      className: "btn sm",
-                      title: "管理者の緊急用パスワードを再設定します",
-                      onClick: function () {
-                        setResetTarget(u);
-                        setResetPw("");
-                      },
-                    },
-                    "緊急用PW"
-                  )
+                )
               )
             );
           })
@@ -1814,10 +1779,8 @@ window.AppPages = (function () {
         h(
           "tbody",
           null,
-          sortNewestFirst(store.projects).map(function (p) {
-            var author = store.users.find(function (u) {
-              return u.id === p.authorId;
-            });
+          sortNewestFirst(realProjects).map(function (p) {
+            var author = store.authorOf(p);
             return h(
               "tr",
               { key: p.id },
@@ -1825,7 +1788,7 @@ window.AppPages = (function () {
               h("td", null, author ? author.displayName : "不明"),
               h(
                 "td",
-                { style: { display: "flex", gap: 6 } },
+                { style: { display: "flex", gap: "0.375rem" } },
                 h("a", { className: "btn sm", href: "#/project/" + p.id }, "表示"),
                 h("a", { className: "btn sm", href: "#/edit/" + p.id }, "編集"),
                 h(
@@ -1893,9 +1856,10 @@ window.AppPages = (function () {
         onConfirm: function () {
           if (!confirmTarget) return;
           if (confirmTarget.type === "project") {
-            store.deleteProject(confirmTarget.id);
             setConfirmTarget(null);
-            store.toast("案件を削除しました。", "success");
+            store.deleteProject(confirmTarget.id).then(function (res) {
+              store.toast(res.ok ? "案件を削除しました。" : res.error, res.ok ? "success" : "error");
+            });
           } else {
             handleDeleteTag(confirmTarget.id);
           }

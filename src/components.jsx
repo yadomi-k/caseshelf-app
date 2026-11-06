@@ -23,18 +23,62 @@ window.AppComponents = (function () {
     );
   }
 
+  // 写真を表示する。photo.url があればそのURLを、無ければSalesforceのファイル（photo.id）を取得して表示する。
+  function Photo(props) {
+    var photo = props.photo || {};
+    var direct = photo.dataUrl || photo.url || null;
+    var _src = React.useState(direct);
+    var src = _src[0],
+      setSrc = _src[1];
+    var _failed = React.useState(false);
+    var failed = _failed[0],
+      setFailed = _failed[1];
+    React.useEffect(
+      function () {
+        if (direct) {
+          setSrc(direct);
+          return;
+        }
+        if (!photo.id) return;
+        var alive = true;
+        setSrc(null);
+        setFailed(false);
+        AppSF.imageUrl(photo.id).then(
+          function (u) {
+            if (alive) setSrc(u);
+          },
+          function () {
+            if (alive) setFailed(true);
+          }
+        );
+        return function () {
+          alive = false;
+        };
+      },
+      [photo.id, direct]
+    );
+    if (!src) {
+      return h(
+        "div",
+        { className: cx("photo-placeholder", props.className), role: "img", "aria-label": props.alt || "" },
+        failed ? "表示できません" : ""
+      );
+    }
+    return h("img", { src: src, alt: props.alt || "", className: props.className, loading: props.loading });
+  }
+
   function Avatar(props) {
-    // user: {displayName, avatarImage}, size: 'sm'|'md'|'lg'
+    // user: {displayName, avatarVersionId}, size: 'sm'|'md'|'lg'
     var user = props.user || {};
     var size = props.size || "md";
     var cls = cx("avatar", size === "sm" && "sm", size === "lg" && "lg");
     var initial = (user.displayName || "?").trim().charAt(0);
     var color = AppData.avatarColor(user.id || user.displayName || "x");
-    if (user.avatarImage) {
+    if (user.avatarVersionId) {
       return h(
         "div",
         { className: cls, style: { background: color } },
-        h("img", { src: user.avatarImage, alt: user.displayName })
+        h(Photo, { photo: { id: user.avatarVersionId }, alt: user.displayName })
       );
     }
     return h(
@@ -49,7 +93,7 @@ window.AppComponents = (function () {
       "div",
       { className: "proto-banner" },
       props.children ||
-        "試作品（第1段階）: 架空のデータを使用し、ログインは本番の認証ではありません。保存先はこの端末のブラウザのみです。"
+        "試作品: 投稿はSalesforceに保存され、CaseShelfの利用者全員が閲覧できます。"
     );
   }
 
@@ -180,7 +224,7 @@ window.AppComponents = (function () {
     return h(
       "a",
       { className: "grid-item", href: "#/project/" + project.id },
-      h("img", { src: cover ? cover.url : "", alt: project.title, loading: "lazy" }),
+      h(Photo, { photo: cover, alt: project.title, loading: "lazy" }),
       project.photos.length > 1 ? h(MultiBadge, null) : null,
       h("div", { className: "grid-title" }, project.title)
     );
@@ -239,7 +283,7 @@ window.AppComponents = (function () {
       return h(
         "div",
         { className: "empty-state" },
-        h("div", { style: { fontSize: 32 } }, "\u{1F4F7}"),
+        h("div", { style: { fontSize: "2rem" } }, "\u{1F4F7}"),
         h("div", null, props.emptyMessage || "該当する案件が見つかりませんでした。")
       );
     }
@@ -432,6 +476,7 @@ window.AppComponents = (function () {
   return {
     Logo: Logo,
     Avatar: Avatar,
+    Photo: Photo,
     ProtoBanner: ProtoBanner,
     BottomNav: BottomNav,
     DesktopNav: DesktopNav,
