@@ -17,6 +17,16 @@ window.AppConfig = {
     // ※ 仮の値です。実際の項目のAPI参照名に書き換えてください
     propertyNoField: "PropertyNo__c",
   },
+  // デザイン担当者（投稿画面の「Salesforceで検索」で自動入力する）
+  // 商談 → 商談商品（商品名＝課名）→ プロジェクト管理（基案件で商談商品につながる）→ 所有者 の順にたどる
+  designStaff: {
+    // デザイン部門（商談商品の商品名がこの名前のものを対象にする。この順に投稿画面へ並ぶ）
+    departments: ["スペースデザイン課", "グラフィックデザイン課", "プランニング課"],
+    // プロジェクト管理オブジェクトのAPI参照名
+    projectObject: "Creative_Achievements__c",
+    // プロジェクト管理の、商談商品を参照する項目（基案件）のAPI参照名
+    lineItemField: "Base_opportunity__c",
+  },
   // 最初の管理者のメールアドレス（Salesforceと同じもの）。
   // この人は、CaseShelfの利用者がまだ登録されていなくても、初回ログイン時に自動で「管理者」として登録される。
   // ※Salesforce側で「CaseShelf管理者」の権限セットが付与されている必要がある

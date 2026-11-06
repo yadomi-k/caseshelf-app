@@ -1549,3 +1549,54 @@ body.no-scroll { overflow: hidden; }
   font-size: 0.75rem;
   color: var(--color-text-dim);
 }
+
+/* ---------- デザイン担当者 ---------- */
+
+.design-staff {
+  display: flex;
+  align-items: baseline;
+  gap: 0.625rem;
+  margin: 0.25rem 0 0.625rem;
+  font-size: 0.8125rem;
+}
+.design-staff-label {
+  flex: none;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  letter-spacing: 0.04em;
+}
+.design-staff ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+.design-staff li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.1875rem 0.625rem 0.1875rem 0.25rem;
+  border: 1px solid var(--color-border);
+  border-radius: 62.4375rem;
+  background: var(--color-surface);
+}
+.design-staff-dept {
+  padding: 0.0625rem 0.4375rem;
+  border-radius: 62.4375rem;
+  background: var(--color-accent-dim);
+  color: var(--color-accent);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+.design-staff-name { font-weight: 600; }
+.design-staff.compact { margin: 0.375rem 0 0; font-size: 0.75rem; }
+
+.staff-inputs { display: flex; flex-direction: column; gap: 0.5rem; }
+.staff-row { display: grid; grid-template-columns: 10.5rem minmax(0, 1fr); align-items: center; gap: 0.625rem; }
+.staff-row .staff-dept { margin: 0; font-size: 0.8125rem; font-weight: 600; color: var(--color-text); }
+@media (max-width: 420px) {
+  .staff-row { grid-template-columns: 1fr; gap: 0.25rem; }
+}
