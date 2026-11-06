@@ -172,6 +172,25 @@ window.AppData = (function () {
       var cfg = window.AppConfig || {};
       return cfg.showSamplePosts === false ? [] : SAMPLE_PROJECTS;
     },
+    // 投稿へのリアクションで選べる絵文字（この順に選択画面へ並ぶ）
+    REACTION_EMOJIS: [
+      { emoji: "👍", label: "いいね" },
+      { emoji: "❤️", label: "すてき" },
+      { emoji: "👏", label: "拍手" },
+      { emoji: "🎉", label: "お祝い" },
+      { emoji: "✨", label: "キラキラ" },
+      { emoji: "🔥", label: "アツい" },
+      { emoji: "😍", label: "好き" },
+      { emoji: "😮", label: "すごい" },
+      { emoji: "💡", label: "参考になる" },
+      { emoji: "🙏", label: "ありがとう" },
+      { emoji: "👀", label: "見ました" },
+      { emoji: "💯", label: "完璧" },
+      { emoji: "🙌", label: "最高" },
+      { emoji: "😂", label: "笑" },
+      { emoji: "🤔", label: "気になる" },
+      { emoji: "✅", label: "確認しました" },
+    ],
     LIMITS: {
       // 1投稿あたりの写真の枚数と、元の画像ファイルの合計容量の上限
       maxPhotosPerProject: 5,

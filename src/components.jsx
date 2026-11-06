@@ -215,6 +215,172 @@ window.AppComponents = (function () {
     );
   }
 
+  // 一覧の写真に重ねる、リアクションの小さな表示（多い絵文字を最大3つ＋合計数）
+  function GridReactions(props) {
+    var groups = (props.groups || []).slice();
+    if (!groups.length) return null;
+    var total = groups.reduce(function (sum, g) {
+      return sum + g.count;
+    }, 0);
+    groups.sort(function (a, b) {
+      return b.count - a.count;
+    });
+    return h(
+      "span",
+      { className: "grid-reactions", title: "リアクション " + total + "件" },
+      groups.slice(0, 3).map(function (g) {
+        return h("span", { key: g.emoji, className: "grid-reaction-emoji" }, g.emoji);
+      }),
+      h("span", { className: "grid-reaction-count" }, total)
+    );
+  }
+
+  function reactionTitle(g) {
+    return g.names.join("、") + " が " + g.emoji + " でリアクションしました";
+  }
+
+  // 投稿へのリアクション（Slackのリアクションのように、絵文字ごとの人数を表示し、押すと付ける／外す）
+  // props: groups（store.reactionsFor の結果）, onToggle(emoji), disabled
+  function ReactionBar(props) {
+    var groups = props.groups || [];
+    var _open = React.useState(false);
+    var pickerOpen = _open[0],
+      setPickerOpen = _open[1];
+    var _who = React.useState(false);
+    var showWho = _who[0],
+      setShowWho = _who[1];
+    var wrapRef = React.useRef(null);
+
+    // 選択画面の外を押したら・Escキーで閉じる
+    React.useEffect(
+      function () {
+        if (!pickerOpen) return;
+        function onDown(e) {
+          if (wrapRef.current && !wrapRef.current.contains(e.target)) setPickerOpen(false);
+        }
+        function onKey(e) {
+          if (e.key === "Escape") setPickerOpen(false);
+        }
+        document.addEventListener("mousedown", onDown);
+        document.addEventListener("touchstart", onDown);
+        document.addEventListener("keydown", onKey);
+        return function () {
+          document.removeEventListener("mousedown", onDown);
+          document.removeEventListener("touchstart", onDown);
+          document.removeEventListener("keydown", onKey);
+        };
+      },
+      [pickerOpen]
+    );
+
+    var mineSet = {};
+    groups.forEach(function (g) {
+      if (g.mine) mineSet[g.emoji] = true;
+    });
+
+    return h(
+      "div",
+      { className: "reaction-area" },
+      h(
+        "div",
+        { className: "reaction-bar", ref: wrapRef },
+        groups.map(function (g) {
+          return h(
+            "button",
+            {
+              key: g.emoji,
+              type: "button",
+              className: cx("reaction-pill", g.mine && "mine"),
+              title: reactionTitle(g),
+              "aria-pressed": g.mine,
+              "aria-label": g.emoji + " " + g.count + "件" + (g.mine ? "（リアクション済み。押すと取り消し）" : ""),
+              disabled: props.disabled,
+              onClick: function () {
+                props.onToggle(g.emoji);
+              },
+            },
+            h("span", { className: "reaction-emoji" }, g.emoji),
+            h("span", { className: "reaction-count" }, g.count)
+          );
+        }),
+        h(
+          "button",
+          {
+            type: "button",
+            className: cx("reaction-add", pickerOpen && "open"),
+            title: "リアクションを追加",
+            "aria-label": "リアクションを追加",
+            "aria-expanded": pickerOpen,
+            disabled: props.disabled,
+            onClick: function () {
+              setPickerOpen(!pickerOpen);
+            },
+          },
+          h(
+            "svg",
+            { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" },
+            h("circle", { cx: 11, cy: 12, r: 8 }),
+            h("path", { d: "M8 14.5c.8 1 1.8 1.5 3 1.5s2.2-.5 3-1.5" }),
+            h("circle", { cx: 8.5, cy: 10, r: 0.6, fill: "currentColor" }),
+            h("circle", { cx: 13.5, cy: 10, r: 0.6, fill: "currentColor" }),
+            h("path", { d: "M20 2v5M17.5 4.5h5", strokeWidth: 1.6 })
+          ),
+          groups.length ? null : h("span", { className: "reaction-add-label" }, "リアクション")
+        ),
+        pickerOpen
+          ? h(
+              "div",
+              { className: "reaction-picker", role: "dialog", "aria-label": "リアクションを選ぶ" },
+              AppData.REACTION_EMOJIS.map(function (r) {
+                return h(
+                  "button",
+                  {
+                    key: r.emoji,
+                    type: "button",
+                    className: cx("reaction-choice", mineSet[r.emoji] && "mine"),
+                    title: r.label,
+                    "aria-label": r.label + (mineSet[r.emoji] ? "（リアクション済み）" : ""),
+                    onClick: function () {
+                      setPickerOpen(false);
+                      props.onToggle(r.emoji);
+                    },
+                  },
+                  r.emoji
+                );
+              })
+            )
+          : null
+      ),
+      groups.length
+        ? h(
+            "button",
+            {
+              type: "button",
+              className: "reaction-who-toggle",
+              onClick: function () {
+                setShowWho(!showWho);
+              },
+            },
+            showWho ? "リアクションした人を隠す" : "リアクションした人を見る"
+          )
+        : null,
+      showWho && groups.length
+        ? h(
+            "ul",
+            { className: "reaction-who" },
+            groups.map(function (g) {
+              return h(
+                "li",
+                { key: g.emoji },
+                h("span", { className: "reaction-who-emoji" }, g.emoji),
+                h("span", null, g.names.join("、"))
+              );
+            })
+          )
+        : null
+    );
+  }
+
   function GridItem(props) {
     var project = props.project;
     var cover =
@@ -226,6 +392,7 @@ window.AppComponents = (function () {
       { className: "grid-item", href: "#/project/" + project.id },
       h(Photo, { photo: cover, alt: project.title, loading: "lazy" }),
       project.photos.length > 1 ? h(MultiBadge, null) : null,
+      props.reactions ? h(GridReactions, { groups: props.reactions }) : null,
       h("div", { className: "grid-title" }, project.title)
     );
   }
@@ -298,7 +465,11 @@ window.AppComponents = (function () {
         "div",
         { className: "photo-grid" },
         visible.map(function (p) {
-          return h(GridItem, { key: p.id, project: p });
+          return h(GridItem, {
+            key: p.id,
+            project: p,
+            reactions: props.reactionsFor && !p.isSample ? props.reactionsFor(p.id) : null,
+          });
         })
       ),
       hasMore
@@ -483,6 +654,7 @@ window.AppComponents = (function () {
     TopBar: TopBar,
     Chip: Chip,
     MultiBadge: MultiBadge,
+    ReactionBar: ReactionBar,
     PhotoGrid: PhotoGrid,
     Toast: Toast,
     ConfirmDialog: ConfirmDialog,

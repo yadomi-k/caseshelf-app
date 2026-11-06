@@ -491,6 +491,7 @@ window.AppPages = (function () {
       h(C.PhotoGrid, {
         key: qsKey,
         projects: filtered,
+        reactionsFor: store.reactionsAvailable ? store.reactionsFor : null,
         pageSize: 18,
         initialVisibleCount: initialVisibleCountForKey,
         onVisibleCountChange: handleVisibleCountChange,
@@ -525,6 +526,8 @@ window.AppPages = (function () {
     useEffect(
       function () {
         setIdx(0);
+        // 他の人が付けたリアクションを反映するため、開いたときに読み込み直す
+        if (project && !project.isSample) store.refreshPostReactions(project.id);
       },
       [project && project.id]
     );
@@ -672,6 +675,14 @@ window.AppPages = (function () {
         ),
         project.description
           ? h("p", { className: "detail-desc" }, project.description)
+          : null,
+        !project.isSample && store.reactionsAvailable
+          ? h(C.ReactionBar, {
+              groups: store.reactionsFor(project.id),
+              onToggle: function (emoji) {
+                store.toggleReaction(project.id, emoji);
+              },
+            })
           : null,
         h(
           "div",
@@ -1321,6 +1332,7 @@ window.AppPages = (function () {
     );
     return h(C.PhotoGrid, {
       projects: projects,
+      reactionsFor: store.reactionsAvailable ? store.reactionsFor : null,
       emptyMessage: "保存した案件はまだありません。気になる案件を保存してみましょう。",
     });
   }
@@ -1465,6 +1477,7 @@ window.AppPages = (function () {
       ),
       h(C.PhotoGrid, {
         projects: myProjects,
+        reactionsFor: store.reactionsAvailable ? store.reactionsFor : null,
         emptyMessage: "まだ案件を投稿していません。",
       })
     );
