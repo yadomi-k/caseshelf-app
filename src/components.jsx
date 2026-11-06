@@ -240,6 +240,7 @@ window.AppComponents = (function () {
   }
 
   // 投稿へのリアクション（Slackのリアクションのように、絵文字ごとの人数を表示し、押すと付ける／外す）
+  // リアクションは1投稿につき1人1つまで。別の絵文字を選ぶと付け替わる
   // props: groups（store.reactionsFor の結果）, onToggle(emoji), disabled
   function ReactionBar(props) {
     var groups = props.groups || [];
@@ -277,6 +278,7 @@ window.AppComponents = (function () {
     groups.forEach(function (g) {
       if (g.mine) mineSet[g.emoji] = true;
     });
+    var hasMine = Object.keys(mineSet).length > 0;
 
     return h(
       "div",
@@ -293,7 +295,8 @@ window.AppComponents = (function () {
               className: cx("reaction-pill", g.mine && "mine"),
               title: reactionTitle(g),
               "aria-pressed": g.mine,
-              "aria-label": g.emoji + " " + g.count + "件" + (g.mine ? "（リアクション済み。押すと取り消し）" : ""),
+              "aria-label":
+                g.emoji + " " + g.count + "件" + (g.mine ? "（あなたのリアクション。押すと取り消し）" : hasMine ? "（押すとこの絵文字に変更）" : ""),
               disabled: props.disabled,
               onClick: function () {
                 props.onToggle(g.emoji);
@@ -308,8 +311,8 @@ window.AppComponents = (function () {
           {
             type: "button",
             className: cx("reaction-add", pickerOpen && "open"),
-            title: "リアクションを追加",
-            "aria-label": "リアクションを追加",
+            title: hasMine ? "リアクションを変更" : "リアクションを追加",
+            "aria-label": hasMine ? "リアクションを変更" : "リアクションを追加",
             "aria-expanded": pickerOpen,
             disabled: props.disabled,
             onClick: function () {
@@ -331,6 +334,11 @@ window.AppComponents = (function () {
           ? h(
               "div",
               { className: "reaction-picker", role: "dialog", "aria-label": "リアクションを選ぶ" },
+              h(
+                "div",
+                { className: "reaction-picker-note" },
+                hasMine ? "リアクションは1人1つまでです。別の絵文字を選ぶと変更されます。" : "リアクションは1人1つまでです。"
+              ),
               AppData.REACTION_EMOJIS.map(function (r) {
                 return h(
                   "button",
@@ -339,7 +347,7 @@ window.AppComponents = (function () {
                     type: "button",
                     className: cx("reaction-choice", mineSet[r.emoji] && "mine"),
                     title: r.label,
-                    "aria-label": r.label + (mineSet[r.emoji] ? "（リアクション済み）" : ""),
+                    "aria-label": r.label + (mineSet[r.emoji] ? "（あなたのリアクション。選ぶと取り消し）" : ""),
                     onClick: function () {
                       setPickerOpen(false);
                       props.onToggle(r.emoji);
