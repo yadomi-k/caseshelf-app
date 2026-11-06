@@ -83,22 +83,34 @@ window.AppSF = (function () {
     }
   }
 
-  // デザイン担当者 [{ dept, name }]
+  // デザイン担当者 [{ dept, name, email }]（1人1件）。
+  // email は Salesforce のユーザーのメールアドレスで、CaseShelf の利用者と結び付けるのに使う。
+  // 以前の形式（1件に「山田、鈴木」のように複数人）も1人ずつに分ける。
   function parseDesignStaff(text) {
     try {
       var arr = JSON.parse(text || "[]");
-      return Array.isArray(arr)
-        ? arr
-            .filter(function (d) {
-              return d && d.name;
-            })
-            .map(function (d) {
-              return { dept: String(d.dept || ""), name: String(d.name) };
-            })
-        : [];
+      if (!Array.isArray(arr)) return [];
+      var out = [];
+      arr.forEach(function (d) {
+        if (!d || !d.name) return;
+        var names = splitNames(d.name);
+        names.forEach(function (name) {
+          out.push({ dept: String(d.dept || ""), name: name, email: names.length === 1 ? String(d.email || "") : "" });
+        });
+      });
+      return out;
     } catch (e) {
       return [];
     }
+  }
+
+  function splitNames(text) {
+    return String(text || "")
+      .split(/[、,，\n]/)
+      .map(function (n) {
+        return n.trim();
+      })
+      .filter(Boolean);
   }
 
   // 投稿に「デザイン担当者」の項目（DesignStaff__c）があるか。
@@ -146,9 +158,13 @@ window.AppSF = (function () {
     };
     if (hasDesignStaffField) {
       f.DesignStaff__c = JSON.stringify(
-        (payload.designStaff || []).filter(function (d) {
-          return d && d.name;
-        })
+        (payload.designStaff || [])
+          .filter(function (d) {
+            return d && d.name;
+          })
+          .map(function (d) {
+            return d.email ? { dept: d.dept, name: d.name, email: d.email } : { dept: d.dept, name: d.name };
+          })
       );
     }
     return f;
@@ -207,35 +223,47 @@ window.AppSF = (function () {
     };
   }
 
-  // 商談のデザイン担当者を探す。[{ dept, name }]（部門の並び順。同じ部門に複数人いれば「、」でつなぐ）
+  // 商談のデザイン担当者を探す。[{ dept, name, email }]（1人1件・部門の並び順）
+  var ownerEmailOk = true;
   function findDesignStaff(opportunityId) {
     var c = designConfig();
     if (!c.departments.length || !/^[A-Za-z0-9_]+__c$/.test(c.projectObject) || !/^[A-Za-z0-9_]+__c$/.test(c.lineItemField)) {
       return Promise.reject(new Error("デザイン担当者の設定が正しくありません（src/config.js の designStaff）。"));
     }
     var rel = c.lineItemField.replace(/__c$/, "__r");
-    var soql =
-      "SELECT Owner.Name, " + rel + ".Product2.Name FROM " + c.projectObject +
-      " WHERE " + rel + ".OpportunityId = " + q(opportunityId) +
-      " AND " + rel + ".Product2.Name IN (" + c.departments.map(q).join(",") + ")" +
-      " ORDER BY CreatedDate";
-    return query(soql).then(function (rs) {
-      var byDept = {};
-      rs.forEach(function (r) {
-        var dept = r[rel] && r[rel].Product2 && r[rel].Product2.Name;
-        var name = r.Owner && r.Owner.Name;
-        if (!dept || !name) return;
-        var list = byDept[dept] || (byDept[dept] = []);
-        if (list.indexOf(name) === -1) list.push(name);
-      });
-      return c.departments
-        .filter(function (d) {
-          return byDept[d];
-        })
-        .map(function (d) {
-          return { dept: d, name: byDept[d].join("、") };
+    function run() {
+      return query(
+        "SELECT Owner.Name, " + (ownerEmailOk ? "Owner.Email, " : "") + rel + ".Product2.Name FROM " + c.projectObject +
+          " WHERE " + rel + ".OpportunityId = " + q(opportunityId) +
+          " AND " + rel + ".Product2.Name IN (" + c.departments.map(q).join(",") + ")" +
+          " ORDER BY CreatedDate"
+      );
+    }
+    return run()
+      .catch(function (e) {
+        // 所有者のメールアドレスが取れない環境では、名前だけで探す
+        if (ownerEmailOk && e.code === "INVALID_FIELD" && /Email/.test(e.message)) {
+          ownerEmailOk = false;
+          return run();
+        }
+        throw e;
+      })
+      .then(function (rs) {
+        var byDept = {};
+        rs.forEach(function (r) {
+          var dept = r[rel] && r[rel].Product2 && r[rel].Product2.Name;
+          var name = r.Owner && r.Owner.Name;
+          if (!dept || !name) return;
+          var list = byDept[dept] || (byDept[dept] = []);
+          if (list.some(function (p) { return p.name === name; })) return;
+          list.push({ dept: dept, name: name, email: (r.Owner && r.Owner.Email) || "" });
         });
-    });
+        var out = [];
+        c.departments.forEach(function (d) {
+          if (byDept[d]) out = out.concat(byDept[d]);
+        });
+        return out;
+      });
   }
 
   // 自分の保存（ブックマーク）。[{ id, postId }]
@@ -501,6 +529,7 @@ window.AppSF = (function () {
       return designConfig().departments;
     },
     findDesignStaff: findDesignStaff,
+    splitNames: splitNames,
     loadMySaves: loadMySaves,
     loadPendingRequests: loadPendingRequests,
     loadReactions: loadReactions,

@@ -301,7 +301,13 @@ window.AppPages = (function () {
           return AppUtils.tagKey(t).indexOf(qKey) !== -1;
         });
         var staffMatch = (p.designStaff || []).some(function (d) {
-          return String(d.name).toLowerCase().indexOf(qKey) !== -1;
+          if (String(d.name).toLowerCase().indexOf(qKey) !== -1) return true;
+          var u =
+            d.email &&
+            (users || []).find(function (x) {
+              return String(x.email).toLowerCase() === String(d.email).toLowerCase();
+            });
+          return !!u && String(u.displayName).toLowerCase().indexOf(qKey) !== -1;
         });
         if (!titleMatch && !tagMatch && !staffMatch) return false;
       }
@@ -728,10 +734,22 @@ window.AppPages = (function () {
     );
   }
 
-  // デザイン担当者の表示（案件詳細・タイムライン）
+  // デザイン担当者の表示（案件詳細・タイムライン）。
+  // CaseShelf の利用者と結び付いた人は、プロフィール画像と CaseShelf の表示名で表示する
   function DesignStaffList(props) {
+    var store = props.store;
     var list = props.staff || [];
     if (!list.length) return null;
+    var groups = [];
+    var index = {};
+    list.forEach(function (p) {
+      var g = index[p.dept];
+      if (!g) {
+        g = index[p.dept] = { dept: p.dept, people: [] };
+        groups.push(g);
+      }
+      g.people.push(p);
+    });
     return h(
       "div",
       { className: cx("design-staff", props.compact && "compact") },
@@ -739,12 +757,24 @@ window.AppPages = (function () {
       h(
         "ul",
         null,
-        list.map(function (d) {
+        groups.map(function (g) {
           return h(
             "li",
-            { key: d.dept + d.name },
-            d.dept ? h("span", { className: "design-staff-dept" }, d.dept) : null,
-            h("span", { className: "design-staff-name" }, d.name)
+            { key: g.dept },
+            g.dept ? h("span", { className: "design-staff-dept" }, g.dept) : null,
+            g.people.map(function (p, i) {
+              var u = store.userForStaff(p);
+              return h(
+                "span",
+                {
+                  key: p.name + i,
+                  className: cx("design-staff-person", u && "linked"),
+                  title: u ? "CaseShelfの利用者: " + u.displayName : p.name + "（CaseShelf未登録）",
+                },
+                h(C.Avatar, { user: u || { displayName: p.name }, size: "sm" }),
+                h("span", { className: "design-staff-name" }, u ? u.displayName : p.name)
+              );
+            })
           );
         })
       )
@@ -834,7 +864,7 @@ window.AppPages = (function () {
             : null
         ),
         h("a", { className: "tl-title", href: "#/project/" + project.id }, project.title),
-        h(DesignStaffList, { staff: project.designStaff, compact: true }),
+        h(DesignStaffList, { staff: project.designStaff, store: store, compact: true }),
         desc
           ? h(
               "p",
@@ -1056,7 +1086,7 @@ window.AppPages = (function () {
           project.propertyNo ? h("span", null, "·") : null,
           project.propertyNo ? h("span", null, "物件No " + project.propertyNo) : null
         ),
-        h(DesignStaffList, { staff: project.designStaff }),
+        h(DesignStaffList, { staff: project.designStaff, store: store }),
         h(
           "div",
           { className: "tag-list" },
@@ -1192,10 +1222,18 @@ window.AppPages = (function () {
     var _staff = useState(function () {
       var m = {};
       ((existing && existing.designStaff) || []).forEach(function (d) {
-        m[d.dept] = d.name;
+        m[d.dept] = m[d.dept] ? m[d.dept] + "、" + d.name : d.name;
       });
       return m;
     });
+    // 担当者名 → Salesforceのメールアドレス（CaseShelfの利用者と結び付けるため、保存時に一緒に記録する）
+    var staffEmailRef = useRef(null);
+    if (!staffEmailRef.current) {
+      staffEmailRef.current = {};
+      ((existing && existing.designStaff) || []).forEach(function (d) {
+        if (d.email) staffEmailRef.current[d.name] = d.email;
+      });
+    }
     var staff = _staff[0],
       setStaff = _staff[1];
     var staffEnabled = AppSF.designStaffAvailable() && departments.length > 0;
@@ -1375,12 +1413,13 @@ window.AppPages = (function () {
             function (found) {
               if (seq !== searchSeqRef.current) return;
               // 見つかった部門の担当者で置き換える（見つからなかった部門は、入力済みの内容を残す）
+              var byDept = {};
+              found.forEach(function (d) {
+                if (d.email) staffEmailRef.current[d.name] = d.email;
+                byDept[d.dept] = byDept[d.dept] ? byDept[d.dept] + "、" + d.name : d.name;
+              });
               setStaff(function (prev) {
-                var next = Object.assign({}, prev);
-                found.forEach(function (d) {
-                  next[d.dept] = d.name;
-                });
-                return next;
+                return Object.assign({}, prev, byDept);
               });
               setSfSearch({
                 state: "found",
@@ -1388,9 +1427,9 @@ window.AppPages = (function () {
                   baseMsg +
                   (found.length
                     ? " デザイン担当者（" +
-                      found
-                        .map(function (d) {
-                          return d.dept + "：" + d.name;
+                      Object.keys(byDept)
+                        .map(function (k) {
+                          return k + "：" + byDept[k];
                         })
                         .join("／") +
                       "）を入力しました。"
@@ -1459,13 +1498,19 @@ window.AppPages = (function () {
         coverPhotoId: finalCoverId,
         salesforceUrl: sfdc.trim(),
         propertyNo: propNo.trim(),
-        designStaff: departments
-          .map(function (d) {
-            return { dept: d, name: String(staff[d] || "").trim() };
-          })
-          .filter(function (d) {
-            return d.name;
-          }),
+        designStaff: departments.reduce(function (acc, d) {
+          return acc.concat(
+            AppSF.splitNames(staff[d]).map(function (name) {
+              var email = staffEmailRef.current[name] || "";
+              if (!email) {
+                // 手入力した名前が CaseShelf の利用者の表示名と一致すれば、その人として記録する
+                var u = store.userForStaff({ name: name });
+                if (u) email = u.email;
+              }
+              return { dept: d, name: name, email: email };
+            })
+          );
+        }, []),
       };
 
       setSaving(true);
