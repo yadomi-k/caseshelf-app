@@ -423,6 +423,27 @@ window.AppPages = (function () {
 
     var hasFilter = !!(q || tag);
 
+    // PCでは、検索サイドバーを閉じたり開いたりできる（閉じた状態はこのブラウザに覚えておく）
+    var SIDEBAR_PREF = "caseshelf_feed_sidebar_closed";
+    var _closed = useState(function () {
+      try {
+        return localStorage.getItem(SIDEBAR_PREF) === "1";
+      } catch (e) {
+        return false;
+      }
+    });
+    var sidebarClosed = _closed[0],
+      setSidebarClosed = _closed[1];
+    function setClosedPref(v) {
+      setSidebarClosed(v);
+      try {
+        localStorage.setItem(SIDEBAR_PREF, v ? "1" : "0");
+      } catch (e) {}
+    }
+    function isDesktop() {
+      return window.matchMedia && window.matchMedia("(min-width: 860px)").matches;
+    }
+
     // スマートフォンでは、検索サイドバーを「検索・絞り込み」ボタンで開く
     var _panel = useState(false);
     var panelOpen = _panel[0],
@@ -493,43 +514,48 @@ window.AppPages = (function () {
       onSelectTag: selectTag,
       resultCount: filtered.length,
       onClose: function () {
-        setPanelOpen(false);
+        if (isDesktop()) setClosedPref(true);
+        else setPanelOpen(false);
       },
     });
 
+    var filterBar = h(
+      "div",
+      { className: "feed-mobile-bar" },
+      h(
+        "button",
+        {
+          type: "button",
+          className: cx("btn sm feed-filter-btn", !sidebarClosed && "pc-open"),
+          "aria-expanded": isDesktop() ? !sidebarClosed : panelOpen,
+          onClick: function () {
+            if (isDesktop()) setClosedPref(!sidebarClosed);
+            else setPanelOpen(true);
+          },
+        },
+        h(SearchIcon, null),
+        h("span", { className: "sp-only" }, "検索・絞り込み"),
+        h("span", { className: "pc-only" }, sidebarClosed ? "検索・絞り込みを開く" : "検索・絞り込みを閉じる")
+      ),
+      hasFilter
+        ? h(
+            "div",
+            { className: "feed-mobile-conds" },
+            q ? h("span", { className: "cond" }, "「" + q + "」") : null,
+            tag ? h("span", { className: "cond" }, "#" + tag) : null,
+            h(
+              "button",
+              { type: "button", className: "link-btn", onClick: clearAll },
+              "解除"
+            )
+          )
+        : null,
+      h("span", { className: "feed-mobile-count" }, filtered.length + "件")
+    );
+
     return h(
       "div",
-      { className: "feed-layout" },
-      // スマートフォン用：検索・絞り込みボタンと、今の条件
-      h(
-        "div",
-        { className: "feed-mobile-bar" },
-        h(
-          "button",
-          {
-            type: "button",
-            className: "btn sm feed-filter-btn",
-            onClick: function () {
-              setPanelOpen(true);
-            },
-          },
-          h(SearchIcon, null),
-          "検索・絞り込み"
-        ),
-        hasFilter
-          ? h(
-              "div",
-              { className: "feed-mobile-conds" },
-              q ? h("span", { className: "cond" }, "「" + q + "」") : null,
-              tag ? h("span", { className: "cond" }, "#" + tag) : null,
-              h(
-                "button",
-                { type: "button", className: "link-btn", onClick: clearAll },
-                "解除"
-              )
-            )
-          : h("span", { className: "feed-mobile-count" }, filtered.length + "件")
-      ),
+      { className: cx("feed-layout", sidebarClosed && "sidebar-closed") },
       h(
         "aside",
         { className: cx("feed-sidebar", panelOpen && "open"), "aria-label": "検索・絞り込み" },
@@ -546,6 +572,7 @@ window.AppPages = (function () {
       h(
         "div",
         { className: "feed-main" },
+        filterBar,
         h(C.PhotoGrid, {
           key: qsKey,
           projects: filtered,
@@ -699,6 +726,223 @@ window.AppPages = (function () {
   }
 
   // ====================================================================
+  // タイムライン（新しい投稿から順に、写真・内容・投稿者を眺める）
+  // ====================================================================
+  var TL_PAGE = 8;
+  var TL_STATE_KEY = "caseshelf_timeline_state";
+
+  function relativeTime(iso) {
+    var t = new Date(iso).getTime();
+    if (isNaN(t)) return "";
+    var diff = Math.max(0, Date.now() - t) / 1000;
+    if (diff < 60) return "たった今";
+    if (diff < 3600) return Math.floor(diff / 60) + "分前";
+    if (diff < 86400) return Math.floor(diff / 3600) + "時間前";
+    if (diff < 86400 * 7) return Math.floor(diff / 86400) + "日前";
+    var d = new Date(t);
+    return d.getFullYear() + "年" + (d.getMonth() + 1) + "月" + d.getDate() + "日";
+  }
+
+  function TimelinePost(props) {
+    var store = props.store;
+    var project = props.project;
+    var route = props.route;
+    var author = store.authorOf(project);
+    var saved = store.isSaved(project.id);
+    var _more = useState(false);
+    var expanded = _more[0],
+      setExpanded = _more[1];
+    var desc = String(project.description || "");
+    var longDesc = desc.length > 90 || desc.split(/\r?\n/).length > 3;
+
+    return h(
+      "article",
+      { className: "tl-post" },
+      h(
+        "header",
+        { className: "tl-head" },
+        h(C.Avatar, { user: author, size: "sm" }),
+        h(
+          "div",
+          { className: "tl-head-text" },
+          h("div", { className: "tl-author" }, author.displayName),
+          h(
+            "div",
+            { className: "tl-meta" },
+            relativeTime(project.createdAt),
+            project.propertyNo ? " · 物件No " + project.propertyNo : ""
+          )
+        ),
+        project.isSample ? h("span", { className: "sample-badge" }, "サンプル") : null
+      ),
+      h(C.PhotoCarousel, { photos: project.photos, alt: project.title, className: "tl-photos", loading: "lazy" }),
+      h(
+        "div",
+        { className: "tl-body" },
+        h(
+          "div",
+          { className: "tl-actions" },
+          !project.isSample && store.reactionsAvailable
+            ? h(C.ReactionBar, {
+                groups: store.reactionsFor(project.id),
+                onToggle: function (emoji) {
+                  store.toggleReaction(project.id, emoji);
+                },
+              })
+            : h("div", null),
+          !project.isSample
+            ? h(
+                "button",
+                {
+                  type: "button",
+                  className: cx("tl-save", saved && "saved"),
+                  onClick: function () {
+                    store.toggleSave(project.id);
+                  },
+                  "aria-pressed": saved,
+                  title: saved ? "保存を解除" : "保存",
+                },
+                saved ? "★" : "☆",
+                h("span", null, saved ? "保存済み" : "保存")
+              )
+            : null
+        ),
+        h("a", { className: "tl-title", href: "#/project/" + project.id }, project.title),
+        desc
+          ? h(
+              "p",
+              { className: cx("tl-desc", !expanded && longDesc && "clamped") },
+              desc
+            )
+          : null,
+        desc && longDesc
+          ? h(
+              "button",
+              {
+                type: "button",
+                className: "link-btn tl-more",
+                onClick: function () {
+                  setExpanded(!expanded);
+                },
+              },
+              expanded ? "閉じる" : "続きを読む"
+            )
+          : null,
+        project.tags.length
+          ? h(
+              "div",
+              { className: "tl-tags" },
+              project.tags.map(function (t) {
+                return h(
+                  "a",
+                  { key: t, className: "tl-tag", href: "#/feed" + AppUtils.buildQuery({ tag: t }) },
+                  "#" + t
+                );
+              })
+            )
+          : null,
+        h("a", { className: "tl-detail-link", href: "#/project/" + project.id }, "詳細を見る ›")
+      )
+    );
+  }
+
+  function TimelinePage(props) {
+    var store = props.store;
+    var list = useMemo(
+      function () {
+        return sortNewestFirst(store.projects);
+      },
+      [store.projects]
+    );
+
+    function readState() {
+      try {
+        return JSON.parse(sessionStorage.getItem(TL_STATE_KEY) || "null");
+      } catch (e) {
+        return null;
+      }
+    }
+    var restored = useMemo(readState, []);
+    var _count = useState((restored && restored.count) || TL_PAGE);
+    var count = _count[0],
+      setCount = _count[1];
+    var countRef = useRef(count);
+    countRef.current = count;
+    var sentinelRef = useRef(null);
+
+    // 前回見ていた位置に戻す（詳細画面から戻ったとき）
+    useEffect(function () {
+      if (restored && restored.scrollY) {
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () {
+            window.scrollTo(0, restored.scrollY);
+          });
+        });
+      } else {
+        window.scrollTo(0, 0);
+      }
+      function onScroll() {
+        try {
+          sessionStorage.setItem(TL_STATE_KEY, JSON.stringify({ count: countRef.current, scrollY: window.scrollY }));
+        } catch (e) {}
+      }
+      window.addEventListener("scroll", onScroll, { passive: true });
+      return function () {
+        window.removeEventListener("scroll", onScroll);
+      };
+    }, []);
+
+    // 下までスクロールしたら続きを表示する
+    useEffect(
+      function () {
+        var el = sentinelRef.current;
+        if (!el) return;
+        var obs = new IntersectionObserver(
+          function (entries) {
+            if (entries[0].isIntersecting) {
+              setCount(function (c) {
+                return Math.min(list.length, c + TL_PAGE);
+              });
+            }
+          },
+          { rootMargin: "800px" }
+        );
+        obs.observe(el);
+        return function () {
+          obs.disconnect();
+        };
+      },
+      [list.length, count]
+    );
+
+    if (!list.length) {
+      return h(
+        "div",
+        { className: "empty-state" },
+        h("div", null, "まだ案件が投稿されていません。"),
+        h("a", { className: "btn primary", href: "#/new" }, "案件を投稿する")
+      );
+    }
+
+    var visible = list.slice(0, count);
+    return h(
+      "div",
+      { className: "timeline" },
+      visible.map(function (p) {
+        return h(TimelinePost, { key: p.id, project: p, store: store, route: props.route });
+      }),
+      count < list.length
+        ? h(
+            React.Fragment,
+            null,
+            h("div", { className: "grid-loading-more" }, "読み込み中..."),
+            h("div", { className: "grid-sentinel", ref: sentinelRef })
+          )
+        : h("div", { className: "tl-end" }, "すべての投稿を表示しました")
+    );
+  }
+
+  // ====================================================================
   // 案件詳細
   // ====================================================================
   function ProjectDetailPage(props) {
@@ -707,21 +951,12 @@ window.AppPages = (function () {
     var project = store.projects.find(function (p) {
       return p.id === route.params.id;
     });
-    var _idx = useState(0);
-    var idx = _idx[0],
-      setIdx = _idx[1];
-    var touchStartX = useRef(null);
-    var touchDeltaX = useRef(0);
-    var _drag = useState(0);
-    var dragX = _drag[0],
-      setDragX = _drag[1];
     var _confirm = useState(false);
     var confirmOpen = _confirm[0],
       setConfirmOpen = _confirm[1];
 
     useEffect(
       function () {
-        setIdx(0);
         // 他の人が付けたリアクションを反映するため、開いたときに読み込み直す
         if (project && !project.isSample) store.refreshPostReactions(project.id);
       },
@@ -741,39 +976,9 @@ window.AppPages = (function () {
       );
     }
 
-    var photos = project.photos;
-    var total = photos.length;
     var author = store.authorOf(project);
     var canEdit = store.canEdit(project);
     var saved = store.isSaved(project.id);
-
-    function go(delta) {
-      setIdx(function (i) {
-        return AppUtils.clamp(i + delta, 0, total - 1);
-      });
-    }
-
-    function onTouchStart(e) {
-      touchStartX.current = e.touches[0].clientX;
-      touchDeltaX.current = 0;
-    }
-    function onTouchMove(e) {
-      if (touchStartX.current == null) return;
-      touchDeltaX.current = e.touches[0].clientX - touchStartX.current;
-      setDragX(touchDeltaX.current);
-    }
-    function onTouchEnd() {
-      var d = touchDeltaX.current;
-      if (d < -50 && idx < total - 1) setIdx(idx + 1);
-      else if (d > 50 && idx > 0) setIdx(idx - 1);
-      touchStartX.current = null;
-      touchDeltaX.current = 0;
-      setDragX(0);
-    }
-
-    var trackStyle = {
-      transform: "translateX(calc(-" + idx * 100 + "% + " + dragX + "px))",
-    };
 
     function handleDelete() {
       setConfirmOpen(false);
@@ -792,39 +997,8 @@ window.AppPages = (function () {
       null,
       h(
         "div",
-        {
-          className: "detail-carousel",
-          onTouchStart: onTouchStart,
-          onTouchMove: onTouchMove,
-          onTouchEnd: onTouchEnd,
-        },
-        h(
-          "div",
-          { className: "track", style: trackStyle },
-          photos.map(function (ph) {
-            return h(
-              "div",
-              { className: "slide", key: ph.id },
-              h(C.Photo, { photo: ph, alt: project.title })
-            );
-          })
-        ),
-        idx > 0
-          ? h(
-              "button",
-              { className: "nav-arrow left", onClick: function () { go(-1); }, "aria-label": "前の写真" },
-              "‹"
-            )
-          : null,
-        idx < total - 1
-          ? h(
-              "button",
-              { className: "nav-arrow right", onClick: function () { go(1); }, "aria-label": "次の写真" },
-              "›"
-            )
-          : null,
-        total > 1 ? h("div", { className: "counter" }, (idx + 1) + " / " + total) : null
-      ),
+        { className: "detail-layout" },
+      h(C.PhotoCarousel, { photos: project.photos, alt: project.title, resetKey: project.id, className: "detail-photos" }),
       h(
         "div",
         { className: "detail-body" },
@@ -915,6 +1089,7 @@ window.AppPages = (function () {
               )
             : null
         )
+      )
       ),
       h(C.ConfirmDialog, {
         open: confirmOpen,
@@ -2089,6 +2264,7 @@ window.AppPages = (function () {
   return {
     LoginPage: LoginPage,
     FeedPage: FeedPage,
+    TimelinePage: TimelinePage,
     ProjectDetailPage: ProjectDetailPage,
     PostFormPage: PostFormPage,
     SavedPage: SavedPage,

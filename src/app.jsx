@@ -52,6 +52,7 @@
     if (pathname === "/" || pathname === "") return { name: "feed", params: {} };
     if (pathname === "/login") return { name: "login", params: {} };
     if (pathname === "/feed") return { name: "feed", params: {} };
+    if (pathname === "/timeline") return { name: "timeline", params: {} };
     if (pathname === "/new") return { name: "new", params: {} };
     if (pathname === "/saved") return { name: "saved", params: {} };
     if (pathname === "/profile") return { name: "profile", params: {} };
@@ -65,6 +66,7 @@
 
   var ROUTE_TITLES = {
     feed: null,
+    timeline: "タイムライン",
     project: "案件詳細",
     new: "案件を投稿",
     edit: "案件を編集",
@@ -924,6 +926,8 @@
     var activeNavKey =
       route.name === "feed"
         ? "feed"
+        : route.name === "timeline"
+        ? "timeline"
         : route.name === "new"
         ? "new"
         : route.name === "saved"
@@ -945,6 +949,9 @@
     switch (route.name) {
       case "feed":
         page = h(P.FeedPage, routeProps);
+        break;
+      case "timeline":
+        page = h(P.TimelinePage, routeProps);
         break;
       case "project":
         page = h(P.ProjectDetailPage, routeProps);
