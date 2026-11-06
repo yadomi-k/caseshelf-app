@@ -300,7 +300,16 @@ window.AppPages = (function () {
         var tagMatch = p.tags.some(function (t) {
           return AppUtils.tagKey(t).indexOf(qKey) !== -1;
         });
-        if (!titleMatch && !tagMatch) return false;
+        var staffMatch = (p.designStaff || []).some(function (d) {
+          if (String(d.name).toLowerCase().indexOf(qKey) !== -1) return true;
+          var u =
+            d.email &&
+            (users || []).find(function (x) {
+              return String(x.email).toLowerCase() === String(d.email).toLowerCase();
+            });
+          return !!u && String(u.displayName).toLowerCase().indexOf(qKey) !== -1;
+        });
+        if (!titleMatch && !tagMatch && !staffMatch) return false;
       }
       return true;
     });
@@ -638,7 +647,7 @@ window.AppPages = (function () {
             type: "search",
             value: props.inputVal,
             onChange: props.onInputChange,
-            placeholder: "案件名・ハッシュタグ",
+            placeholder: "案件名・タグ・デザイン担当者",
             enterKeyHint: "search",
           }),
           props.inputVal
@@ -721,6 +730,53 @@ window.AppPages = (function () {
           { type: "button", className: "btn primary sidebar-done", onClick: props.onClose },
           props.resultCount + "件の結果を見る"
         )
+      )
+    );
+  }
+
+  // デザイン担当者の表示（案件詳細・タイムライン）。
+  // CaseShelf の利用者と結び付いた人は、プロフィール画像と CaseShelf の表示名で表示する
+  function DesignStaffList(props) {
+    var store = props.store;
+    var list = props.staff || [];
+    if (!list.length) return null;
+    var groups = [];
+    var index = {};
+    list.forEach(function (p) {
+      var g = index[p.dept];
+      if (!g) {
+        g = index[p.dept] = { dept: p.dept, people: [] };
+        groups.push(g);
+      }
+      g.people.push(p);
+    });
+    return h(
+      "div",
+      { className: cx("design-staff", props.compact && "compact") },
+      h("span", { className: "design-staff-label" }, "デザイン担当"),
+      h(
+        "ul",
+        null,
+        groups.map(function (g) {
+          return h(
+            "li",
+            { key: g.dept },
+            g.dept ? h("span", { className: "design-staff-dept" }, g.dept) : null,
+            g.people.map(function (p, i) {
+              var u = store.userForStaff(p);
+              return h(
+                "span",
+                {
+                  key: p.name + i,
+                  className: cx("design-staff-person", u && "linked"),
+                  title: u ? "CaseShelfの利用者: " + u.displayName : p.name + "（CaseShelf未登録）",
+                },
+                h(C.Avatar, { user: u || { displayName: p.name }, size: "sm" }),
+                h("span", { className: "design-staff-name" }, u ? u.displayName : p.name)
+              );
+            })
+          );
+        })
       )
     );
   }
@@ -808,6 +864,7 @@ window.AppPages = (function () {
             : null
         ),
         h("a", { className: "tl-title", href: "#/project/" + project.id }, project.title),
+        h(DesignStaffList, { staff: project.designStaff, store: store, compact: true }),
         desc
           ? h(
               "p",
@@ -1029,6 +1086,7 @@ window.AppPages = (function () {
           project.propertyNo ? h("span", null, "·") : null,
           project.propertyNo ? h("span", null, "物件No " + project.propertyNo) : null
         ),
+        h(DesignStaffList, { staff: project.designStaff, store: store }),
         h(
           "div",
           { className: "tag-list" },
@@ -1159,6 +1217,26 @@ window.AppPages = (function () {
     var sfSearch = _sfSearch[0],
       setSfSearch = _sfSearch[1];
     var searchSeqRef = useRef(0);
+    // デザイン担当者 { 部門名: 担当者名 }
+    var departments = AppSF.designDepartments();
+    var _staff = useState(function () {
+      var m = {};
+      ((existing && existing.designStaff) || []).forEach(function (d) {
+        m[d.dept] = m[d.dept] ? m[d.dept] + "、" + d.name : d.name;
+      });
+      return m;
+    });
+    // 担当者名 → Salesforceのメールアドレス（CaseShelfの利用者と結び付けるため、保存時に一緒に記録する）
+    var staffEmailRef = useRef(null);
+    if (!staffEmailRef.current) {
+      staffEmailRef.current = {};
+      ((existing && existing.designStaff) || []).forEach(function (d) {
+        if (d.email) staffEmailRef.current[d.name] = d.email;
+      });
+    }
+    var staff = _staff[0],
+      setStaff = _staff[1];
+    var staffEnabled = AppSF.designStaffAvailable() && departments.length > 0;
     var _tags = useState(existing ? existing.tags.slice() : []);
     var tags = _tags[0],
       setTags = _tags[1];
@@ -1323,12 +1401,49 @@ window.AppPages = (function () {
           setErrors(function (prev) {
             return Object.assign({}, prev, { title: null });
           });
-          setSfSearch({
-            state: "found",
-            message:
-              "商談「" + opp.name + "」が見つかりました。案件名とSalesforce案件URLを入力しました。" +
-              (opp.multiple ? "（同じ物件Noの商談が複数あったため、1件目を使いました）" : ""),
-          });
+          var baseMsg =
+            "商談「" + opp.name + "」が見つかりました。案件名とSalesforce案件URLを入力しました。" +
+            (opp.multiple ? "（同じ物件Noの商談が複数あったため、1件目を使いました）" : "");
+          if (!staffEnabled) {
+            setSfSearch({ state: "found", message: baseMsg });
+            return;
+          }
+          setSfSearch({ state: "found", message: baseMsg + " デザイン担当者を検索しています..." });
+          AppSF.findDesignStaff(opp.id).then(
+            function (found) {
+              if (seq !== searchSeqRef.current) return;
+              // 見つかった部門の担当者で置き換える（見つからなかった部門は、入力済みの内容を残す）
+              var byDept = {};
+              found.forEach(function (d) {
+                if (d.email) staffEmailRef.current[d.name] = d.email;
+                byDept[d.dept] = byDept[d.dept] ? byDept[d.dept] + "、" + d.name : d.name;
+              });
+              setStaff(function (prev) {
+                return Object.assign({}, prev, byDept);
+              });
+              setSfSearch({
+                state: "found",
+                message:
+                  baseMsg +
+                  (found.length
+                    ? " デザイン担当者（" +
+                      Object.keys(byDept)
+                        .map(function (k) {
+                          return k + "：" + byDept[k];
+                        })
+                        .join("／") +
+                      "）を入力しました。"
+                    : " デザイン担当者はSalesforceに登録されていませんでした（必要なら手入力してください）。"),
+              });
+            },
+            function (e) {
+              if (seq !== searchSeqRef.current) return;
+              setSfSearch({
+                state: "found",
+                message: baseMsg + " ただし、デザイン担当者は取得できませんでした（" + e.message + "）。必要なら手入力してください。",
+              });
+            }
+          );
         },
         function (e) {
           if (seq !== searchSeqRef.current) return;
@@ -1383,6 +1498,19 @@ window.AppPages = (function () {
         coverPhotoId: finalCoverId,
         salesforceUrl: sfdc.trim(),
         propertyNo: propNo.trim(),
+        designStaff: departments.reduce(function (acc, d) {
+          return acc.concat(
+            AppSF.splitNames(staff[d]).map(function (name) {
+              var email = staffEmailRef.current[name] || "";
+              if (!email) {
+                // 手入力した名前が CaseShelf の利用者の表示名と一致すれば、その人として記録する
+                var u = store.userForStaff({ name: name });
+                if (u) email = u.email;
+              }
+              return { dept: d, name: name, email: email };
+            })
+          );
+        }, []),
       };
 
       setSaving(true);
@@ -1466,8 +1594,50 @@ window.AppPages = (function () {
               { className: sfSearch.state === "found" ? "propno-result found" : "error", role: "status" },
               sfSearch.message
             )
-          : h("div", { className: "hint" }, "物件Noを入力して検索すると、Salesforceの商談から案件名とSalesforce案件URLが自動で入力されます。")
+          : h(
+              "div",
+              { className: "hint" },
+              "物件Noを入力して検索すると、Salesforceの商談から案件名・Salesforce案件URL" +
+                (staffEnabled ? "・デザイン担当者" : "") +
+                "が自動で入力されます。"
+            )
       ),
+
+      staffEnabled
+        ? h(
+            "div",
+            { className: "field" },
+            h("label", null, "デザイン担当者（任意・物件Noの検索で自動入力）"),
+            h(
+              "div",
+              { className: "staff-inputs" },
+              departments.map(function (d, i) {
+                var id = "post-staff-" + i;
+                return h(
+                  "div",
+                  { key: d, className: "staff-row" },
+                  h("label", { htmlFor: id, className: "staff-dept" }, d),
+                  h("input", {
+                    id: id,
+                    className: "text-input",
+                    value: staff[d] || "",
+                    maxLength: 200,
+                    onChange: function (e) {
+                      var v = e.target.value;
+                      setStaff(function (prev) {
+                        var next = Object.assign({}, prev);
+                        next[d] = v;
+                        return next;
+                      });
+                    },
+                    placeholder: "担当者名",
+                  })
+                );
+              })
+            ),
+            h("div", { className: "hint" }, "複数人いる場合は「、」で区切って入力してください。空欄の部門は表示されません。")
+          )
+        : null,
 
       h(
         "div",

@@ -364,6 +364,24 @@
       return u || { displayName: project.authorName || "不明な利用者", email: project.authorEmail || "" };
     }
 
+    // デザイン担当者に対応する CaseShelf の利用者（Salesforceのメールアドレスで結び付ける。
+    // メールアドレスが無いときは、表示名が同じ人が1人だけならその人）。見つからなければ null
+    function userForStaff(person) {
+      if (!person) return null;
+      if (person.email) {
+        var byMail = users.find(function (u) {
+          return lower(u.email) === lower(person.email);
+        });
+        if (byMail) return byMail;
+      }
+      var key = String(person.name || "").replace(/\s+/g, "");
+      if (!key) return null;
+      var same = users.filter(function (u) {
+        return String(u.displayName || "").replace(/\s+/g, "") === key;
+      });
+      return same.length === 1 ? same[0] : null;
+    }
+
     function canEdit(project) {
       if (!currentUser || !project || project.isSample) return false;
       var mySfId = profileRef.current && profileRef.current.sfUserId;
@@ -814,6 +832,7 @@
       currentUser: currentUser,
       isAdmin: isAdmin,
       authorOf: authorOf,
+      userForStaff: userForStaff,
       canEdit: canEdit,
       loginWithSalesforce: loginWithSalesforce,
       requestAccount: requestAccount,

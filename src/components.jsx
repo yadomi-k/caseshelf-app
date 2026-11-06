@@ -194,8 +194,8 @@ window.AppComponents = (function () {
   }
 
   var NAV_ITEMS = [
-    { key: "feed", label: "一覧", path: "#/feed", icon: "⊞" },
     { key: "timeline", label: "タイムライン", path: "#/timeline", icon: "☰" },
+    { key: "feed", label: "一覧", path: "#/feed", icon: "⊞" },
     { key: "new", label: "投稿", path: "#/new", icon: "➕" },
     { key: "saved", label: "保存", path: "#/saved", icon: "★" },
     { key: "profile", label: "マイページ", path: "#/profile", icon: "●" },

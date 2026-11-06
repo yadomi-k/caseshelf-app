@@ -1,7 +1,7 @@
 // CaseShelfのデータをSalesforceに読み書きする
 //
 // 保存先（Salesforceに作るカスタムオブジェクト。作り方は docs/salesforce-setup.md）
-//   CaseShelf_Post__c     投稿（案件名・説明・タグ・物件No・商談URL・写真の並び）
+//   CaseShelf_Post__c     投稿（案件名・説明・タグ・物件No・商談URL・写真の並び・デザイン担当者）
 //   CaseShelf_User__c     CaseShelfの利用者（表示名・メール・権限・状態・プロフィール画像）
 //   CaseShelf_Save__c     保存（ブックマーク）。所有者＝保存した人
 //   CaseShelf_Request__c  未登録の人からの利用登録の依頼
@@ -83,6 +83,40 @@ window.AppSF = (function () {
     }
   }
 
+  // デザイン担当者 [{ dept, name, email }]（1人1件）。
+  // email は Salesforce のユーザーのメールアドレスで、CaseShelf の利用者と結び付けるのに使う。
+  // 以前の形式（1件に「山田、鈴木」のように複数人）も1人ずつに分ける。
+  function parseDesignStaff(text) {
+    try {
+      var arr = JSON.parse(text || "[]");
+      if (!Array.isArray(arr)) return [];
+      var out = [];
+      arr.forEach(function (d) {
+        if (!d || !d.name) return;
+        var names = splitNames(d.name);
+        names.forEach(function (name) {
+          out.push({ dept: String(d.dept || ""), name: name, email: names.length === 1 ? String(d.email || "") : "" });
+        });
+      });
+      return out;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function splitNames(text) {
+    return String(text || "")
+      .split(/[、,，\n]/)
+      .map(function (n) {
+        return n.trim();
+      })
+      .filter(Boolean);
+  }
+
+  // 投稿に「デザイン担当者」の項目（DesignStaff__c）があるか。
+  // Salesforceに項目を追加する前でも他の機能が動くよう、無い場合はこの項目を使わない
+  var hasDesignStaffField = true;
+
   function toPost(r) {
     var photos = parsePhotos(r.Photos__c);
     return {
@@ -104,11 +138,12 @@ window.AppSF = (function () {
       authorEmail: (r.CreatedBy && r.CreatedBy.Email) || "",
       createdById: r.CreatedById || "",
       authorName: (r.CreatedBy && r.CreatedBy.Name) || "",
+      designStaff: parseDesignStaff(r.DesignStaff__c),
     };
   }
 
   function postFields(payload) {
-    return {
+    var f = {
       Title__c: payload.title,
       Description__c: payload.description || "",
       Tags__c: (payload.tags || []).join("\n"),
@@ -121,6 +156,18 @@ window.AppSF = (function () {
       ),
       CoverPhotoId__c: payload.coverPhotoId || "",
     };
+    if (hasDesignStaffField) {
+      f.DesignStaff__c = JSON.stringify(
+        (payload.designStaff || [])
+          .filter(function (d) {
+            return d && d.name;
+          })
+          .map(function (d) {
+            return d.email ? { dept: d.dept, name: d.name, email: d.email } : { dept: d.dept, name: d.name };
+          })
+      );
+    }
+    return f;
   }
 
   // ------------------------------------------------------------------
@@ -143,12 +190,80 @@ window.AppSF = (function () {
   }
 
   function loadPosts() {
-    return query(
-      "SELECT Id, Title__c, Description__c, Tags__c, PropertyNo__c, SalesforceUrl__c, Photos__c, CoverPhotoId__c, " +
-        "CreatedDate, LastModifiedDate, CreatedById, CreatedBy.Email, CreatedBy.Name FROM " + OBJ.post + " ORDER BY CreatedDate DESC"
-    ).then(function (rs) {
-      return rs.map(toPost);
-    });
+    function run() {
+      return query(
+        "SELECT Id, Title__c, Description__c, Tags__c, PropertyNo__c, SalesforceUrl__c, Photos__c, CoverPhotoId__c, " +
+          (hasDesignStaffField ? "DesignStaff__c, " : "") +
+          "CreatedDate, LastModifiedDate, CreatedById, CreatedBy.Email, CreatedBy.Name FROM " + OBJ.post + " ORDER BY CreatedDate DESC"
+      );
+    }
+    return run()
+      .catch(function (e) {
+        // 「デザイン担当者」の項目がまだ無い（または参照できない）場合は、その項目なしで読み込む
+        if (hasDesignStaffField && e.code === "INVALID_FIELD" && /DesignStaff__c/.test(e.message)) {
+          hasDesignStaffField = false;
+          return run();
+        }
+        throw e;
+      })
+      .then(function (rs) {
+        return rs.map(toPost);
+      });
+  }
+
+  // ------------------------------------------------------------------
+  // デザイン担当者（商談 → 商談商品（デザイン部門）→ プロジェクト管理 → 所有者）
+  // ------------------------------------------------------------------
+  function designConfig() {
+    var c = (window.AppConfig && window.AppConfig.designStaff) || {};
+    return {
+      departments: c.departments || [],
+      projectObject: c.projectObject || "",
+      lineItemField: c.lineItemField || "",
+    };
+  }
+
+  // 商談のデザイン担当者を探す。[{ dept, name, email }]（1人1件・部門の並び順）
+  var ownerEmailOk = true;
+  function findDesignStaff(opportunityId) {
+    var c = designConfig();
+    if (!c.departments.length || !/^[A-Za-z0-9_]+__c$/.test(c.projectObject) || !/^[A-Za-z0-9_]+__c$/.test(c.lineItemField)) {
+      return Promise.reject(new Error("デザイン担当者の設定が正しくありません（src/config.js の designStaff）。"));
+    }
+    var rel = c.lineItemField.replace(/__c$/, "__r");
+    function run() {
+      return query(
+        "SELECT Owner.Name, " + (ownerEmailOk ? "Owner.Email, " : "") + rel + ".Product2.Name FROM " + c.projectObject +
+          " WHERE " + rel + ".OpportunityId = " + q(opportunityId) +
+          " AND " + rel + ".Product2.Name IN (" + c.departments.map(q).join(",") + ")" +
+          " ORDER BY CreatedDate"
+      );
+    }
+    return run()
+      .catch(function (e) {
+        // 所有者のメールアドレスが取れない環境では、名前だけで探す
+        if (ownerEmailOk && e.code === "INVALID_FIELD" && /Email/.test(e.message)) {
+          ownerEmailOk = false;
+          return run();
+        }
+        throw e;
+      })
+      .then(function (rs) {
+        var byDept = {};
+        rs.forEach(function (r) {
+          var dept = r[rel] && r[rel].Product2 && r[rel].Product2.Name;
+          var name = r.Owner && r.Owner.Name;
+          if (!dept || !name) return;
+          var list = byDept[dept] || (byDept[dept] = []);
+          if (list.some(function (p) { return p.name === name; })) return;
+          list.push({ dept: dept, name: name, email: (r.Owner && r.Owner.Email) || "" });
+        });
+        var out = [];
+        c.departments.forEach(function (d) {
+          if (byDept[d]) out = out.concat(byDept[d]);
+        });
+        return out;
+      });
   }
 
   // 自分の保存（ブックマーク）。[{ id, postId }]
@@ -407,6 +522,14 @@ window.AppSF = (function () {
     findUserByEmail: findUserByEmail,
     loadUsers: loadUsers,
     loadPosts: loadPosts,
+    designStaffAvailable: function () {
+      return hasDesignStaffField;
+    },
+    designDepartments: function () {
+      return designConfig().departments;
+    },
+    findDesignStaff: findDesignStaff,
+    splitNames: splitNames,
     loadMySaves: loadMySaves,
     loadPendingRequests: loadPendingRequests,
     loadReactions: loadReactions,
