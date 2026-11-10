@@ -114,6 +114,25 @@ img { display: block; max-width: 100%; }
 
 .topbar-spacer { flex: 1; }
 
+/* 戻るボタン：青い丸と矢印 */
+.back-btn {
+  flex: none;
+  width: 2.125rem;
+  height: 2.125rem;
+  border-radius: 50%;
+  border: 2px solid var(--color-accent);
+  background: var(--color-surface);
+  color: var(--color-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.back-btn:hover,
+.back-btn:focus-visible { background: var(--color-accent); color: #fff; }
+.back-btn:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
 .content {
   flex: 1;
   padding-bottom: calc(var(--nav-h) + 1rem);
@@ -1608,3 +1627,5 @@ body.no-scroll { overflow: hidden; }
 @media (max-width: 420px) {
   .staff-row { grid-template-columns: 1fr; gap: 0.25rem; }
 }
+
+select.text-input { appearance: auto; background: var(--color-surface); }

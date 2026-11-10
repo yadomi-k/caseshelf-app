@@ -64,17 +64,6 @@
     return { name: "notfound", params: {} };
   }
 
-  var ROUTE_TITLES = {
-    feed: null,
-    timeline: "タイムライン",
-    project: "案件詳細",
-    new: "案件を投稿",
-    edit: "案件を編集",
-    saved: "保存した案件",
-    profile: "マイページ",
-    admin: "管理者画面",
-  };
-
   // ---------------- トースト ----------------
   function useToasts() {
     var _t = useState([]);
@@ -361,7 +350,7 @@
         users.find(function (x) {
           return x.id === project.authorId;
         });
-      return u || { displayName: project.authorName || "不明な利用者", email: project.authorEmail || "" };
+      return u || { displayName: project.authorName || project.authorEmail || "不明な利用者", email: project.authorEmail || "" };
     }
 
     // デザイン担当者に対応する CaseShelf の利用者（Salesforceのメールアドレスで結び付ける。
@@ -385,7 +374,11 @@
     function canEdit(project) {
       if (!currentUser || !project || project.isSample) return false;
       var mySfId = profileRef.current && profileRef.current.sfUserId;
-      return project.authorId === currentUser.id || (!!mySfId && project.createdById === mySfId) || isAdmin;
+      if (isAdmin) return true;
+      // 編集・削除できるのは、Salesforce上の投稿の所有者と管理者。
+      // 代理投稿では、投稿者に選ばれた人が所有者になる（代理で投稿した人は、投稿後は編集できない）
+      if (mySfId && project.ownerId) return project.ownerId === mySfId;
+      return lower(project.ownerEmail || project.creatorEmail) === lower(currentUser.email);
     }
 
     function wrap(promise) {
@@ -400,10 +393,37 @@
     }
 
     // payload.photos: [{ id, size, dataUrl? }]
+    // 代理投稿：投稿者に選んだ人を、Salesforce上の投稿の所有者にする。
+    // 所有者を変えられなくても投稿自体は保存済みなので、その旨を知らせて続ける
+    function transferOwnerIfNeeded(postId, targetEmail) {
+      var target = lower(targetEmail);
+      var post = posts.find(function (p) {
+        return p.id === postId;
+      });
+      return AppSF.loadPosts().then(function (list) {
+        var saved = list.find(function (p) {
+          return p.id === postId;
+        });
+        var current = lower((saved && saved.ownerEmail) || (post && post.ownerEmail));
+        if (!target || !saved || target === current) return list;
+        return AppSF.changePostOwner(postId, target).then(
+          function () {
+            return AppSF.loadPosts();
+          },
+          function (e) {
+            toast("投稿は保存しましたが、所有者を変更できませんでした（" + e.message + "）", "error");
+            return list;
+          }
+        );
+      });
+    }
+
+    // payload.photos: [{ id, size, dataUrl? }]。payload.ownerEmail: 所有者にする人（代理投稿）
     function addProject(payload) {
       return wrap(
         AppSF.createPost(payload).then(function (id) {
-          return reloadPosts().then(function () {
+          return transferOwnerIfNeeded(id, payload.ownerEmail).then(function (list) {
+            setPosts(list);
             return { id: id };
           });
         })
@@ -413,7 +433,9 @@
     function updateProject(id, payload, removedPhotoIds) {
       return wrap(
         AppSF.updatePost(id, payload, removedPhotoIds).then(function () {
-          return reloadPosts();
+          return transferOwnerIfNeeded(id, payload.ownerEmail).then(function (list) {
+            setPosts(list);
+          });
         })
       );
     }
@@ -1001,7 +1023,6 @@
       { className: "app-shell" },
       h(C.ProtoBanner, null),
       h(C.TopBar, {
-        title: ROUTE_TITLES[route.name],
         onBack: showBack ? handleBack : null,
         active: activeNavKey,
         isAdmin: store.isAdmin,

@@ -1237,6 +1237,37 @@ window.AppPages = (function () {
     var staff = _staff[0],
       setStaff = _staff[1];
     var staffEnabled = AppSF.designStaffAvailable() && departments.length > 0;
+
+    // 投稿者（代理で投稿するときに、表示する人を選ぶ）。新規は自分、編集は今の投稿者
+    // 代理投稿は、Salesforce上の所有者を変えるため管理者（CaseShelf管理者の権限セットを持つ人）だけが行える
+    var authorEnabled = AppSF.authorFieldAvailable() && store.isAdmin;
+    var creatorEmail = existing ? existing.creatorEmail : (store.currentUser && store.currentUser.email) || "";
+    var _author = useState(existing ? existing.authorEmail : creatorEmail);
+    var authorEmail = _author[0],
+      setAuthorEmail = _author[1];
+    var authorChoices = useMemo(
+      function () {
+        var list = store.users
+          .filter(function (u) {
+            return u.status === "active" || String(u.email).toLowerCase() === String(authorEmail).toLowerCase();
+          })
+          .slice()
+          .sort(function (a, b) {
+            return String(a.displayName).localeCompare(String(b.displayName), "ja");
+          });
+        // 選択中の人が利用者一覧にいない場合（登録が削除された等）も選択肢に残す
+        if (
+          authorEmail &&
+          !list.some(function (u) {
+            return String(u.email).toLowerCase() === String(authorEmail).toLowerCase();
+          })
+        ) {
+          list.unshift({ id: "keep", email: authorEmail, displayName: authorEmail });
+        }
+        return list;
+      },
+      [store.users, authorEmail]
+    );
     var _tags = useState(existing ? existing.tags.slice() : []);
     var tags = _tags[0],
       setTags = _tags[1];
@@ -1401,8 +1432,19 @@ window.AppPages = (function () {
           setErrors(function (prev) {
             return Object.assign({}, prev, { title: null });
           });
+          // 物件種別をハッシュタグに追加する（入力済みのタグは残す）
+          var types = opp.propertyTypes || [];
+          if (types.length) {
+            setTags(function (prev) {
+              return AppUtils.uniqueTags(prev.concat(types));
+            });
+            setErrors(function (prev) {
+              return Object.assign({}, prev, { tags: null });
+            });
+          }
           var baseMsg =
             "商談「" + opp.name + "」が見つかりました。案件名とSalesforce案件URLを入力しました。" +
+            (types.length ? " 物件種別「" + types.join("・") + "」をハッシュタグに追加しました。" : "") +
             (opp.multiple ? "（同じ物件Noの商談が複数あったため、1件目を使いました）" : "");
           if (!staffEnabled) {
             setSfSearch({ state: "found", message: baseMsg });
@@ -1498,6 +1540,14 @@ window.AppPages = (function () {
         coverPhotoId: finalCoverId,
         salesforceUrl: sfdc.trim(),
         propertyNo: propNo.trim(),
+        // 投稿者が実際に投稿した人と同じなら空（代理投稿ではない）
+        authorEmail: authorEnabled
+          ? String(authorEmail).toLowerCase() === String(creatorEmail).toLowerCase()
+            ? ""
+            : authorEmail
+          : undefined,
+        // 選んだ投稿者を、Salesforce上の投稿の所有者にする（代理投稿）
+        ownerEmail: authorEnabled ? authorEmail : undefined,
         designStaff: departments.reduce(function (acc, d) {
           return acc.concat(
             AppSF.splitNames(staff[d]).map(function (name) {
@@ -1597,7 +1647,7 @@ window.AppPages = (function () {
           : h(
               "div",
               { className: "hint" },
-              "物件Noを入力して検索すると、Salesforceの商談から案件名・Salesforce案件URL" +
+              "物件Noを入力して検索すると、Salesforceの商談から案件名・Salesforce案件URL・物件種別（ハッシュタグ）" +
                 (staffEnabled ? "・デザイン担当者" : "") +
                 "が自動で入力されます。"
             )
@@ -1636,6 +1686,39 @@ window.AppPages = (function () {
               })
             ),
             h("div", { className: "hint" }, "複数人いる場合は「、」で区切って入力してください。空欄の部門は表示されません。")
+          )
+        : null,
+
+      authorEnabled
+        ? h(
+            "div",
+            { className: "field" },
+            h("label", { htmlFor: "post-author" }, "投稿者"),
+            h(
+              "select",
+              {
+                id: "post-author",
+                className: "text-input",
+                value: authorEmail,
+                onChange: function (e) {
+                  setAuthorEmail(e.target.value);
+                },
+              },
+              authorChoices.map(function (u) {
+                var mine = String(u.email).toLowerCase() === String(creatorEmail).toLowerCase();
+                return h(
+                  "option",
+                  { key: u.email, value: u.email },
+                  u.displayName + (mine ? (isEdit ? "（実際に投稿した人）" : "（自分）") : "")
+                );
+              })
+            ),
+            h(
+              "div",
+              { className: "hint" },
+              "案件の担当者に代わって投稿するときは、担当者を選んでください。選んだ人がこの投稿の所有者になり、" +
+                "投稿者として表示され（マイページにも表示）、編集・削除できるようになります。"
+            )
           )
         : null,
 
