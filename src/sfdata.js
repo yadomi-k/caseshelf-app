@@ -146,6 +146,9 @@ window.AppSF = (function () {
       // 実際に投稿した人（Salesforceのレコードの作成者。編集・削除できるのはこの人と管理者）
       creatorEmail: creatorEmail,
       createdById: r.CreatedById || "",
+      // Salesforce上の所有者（編集・削除できるのは所有者と管理者）。代理投稿では投稿者に選んだ人になる
+      ownerId: r.OwnerId || "",
+      ownerEmail: (r.Owner && r.Owner.Email) || "",
       authorName: r.AuthorEmail__c ? "" : (r.CreatedBy && r.CreatedBy.Name) || "",
       designStaff: parseDesignStaff(r.DesignStaff__c),
     };
@@ -209,7 +212,7 @@ window.AppSF = (function () {
       return query(
         "SELECT Id, Title__c, Description__c, Tags__c, PropertyNo__c, SalesforceUrl__c, Photos__c, CoverPhotoId__c, " +
           extra.map(function (k) { return k + ", "; }).join("") +
-          "CreatedDate, LastModifiedDate, CreatedById, CreatedBy.Email, CreatedBy.Name FROM " + OBJ.post + " ORDER BY CreatedDate DESC"
+          "CreatedDate, LastModifiedDate, CreatedById, CreatedBy.Email, CreatedBy.Name, OwnerId, Owner.Email FROM " + OBJ.post + " ORDER BY CreatedDate DESC"
       );
     }
     function attempt() {
@@ -307,6 +310,9 @@ window.AppSF = (function () {
       postId: r.Post__c || null,
       emoji: r.Emoji__c || "",
       createdById: r.CreatedById || "",
+      // Salesforce上の所有者（編集・削除できるのは所有者と管理者）。代理投稿では投稿者に選んだ人になる
+      ownerId: r.OwnerId || "",
+      ownerEmail: (r.Owner && r.Owner.Email) || "",
       email: (r.CreatedBy && r.CreatedBy.Email) || "",
       name: (r.CreatedBy && r.CreatedBy.Name) || "",
     };
@@ -464,6 +470,30 @@ window.AppSF = (function () {
     });
   }
 
+  // メールアドレスから Salesforce のユーザーID を探す（有効なユーザーのみ）。見つからなければ null
+  var sfUserIdCache = {};
+  function findSfUserIdByEmail(email) {
+    var key = String(email || "").trim().toLowerCase();
+    if (!key) return Promise.resolve(null);
+    if (sfUserIdCache[key] !== undefined) return Promise.resolve(sfUserIdCache[key]);
+    return query("SELECT Id FROM User WHERE Email = " + q(key) + " AND IsActive = true ORDER BY CreatedDate LIMIT 1").then(function (rs) {
+      sfUserIdCache[key] = rs.length ? rs[0].Id : null;
+      return sfUserIdCache[key];
+    });
+  }
+
+  // 投稿の所有者を、メールアドレスの人に変更する（代理投稿）
+  function changePostOwner(postId, email) {
+    return findSfUserIdByEmail(email).then(function (uid) {
+      if (!uid) {
+        throw new Error("Salesforceに " + email + " の有効なユーザーが見つかりませんでした。");
+      }
+      return update(OBJ.post, postId, { OwnerId: uid }).then(function () {
+        return uid;
+      });
+    });
+  }
+
   function updatePostTags(postId, tags) {
     return update(OBJ.post, postId, { Tags__c: tags.join("\n") });
   }
@@ -570,6 +600,7 @@ window.AppSF = (function () {
     updatePost: updatePost,
     deletePost: deletePost,
     updatePostTags: updatePostTags,
+    changePostOwner: changePostOwner,
     addSave: addSave,
     removeSave: removeSave,
     createUser: createUser,

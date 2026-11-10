@@ -1239,7 +1239,8 @@ window.AppPages = (function () {
     var staffEnabled = AppSF.designStaffAvailable() && departments.length > 0;
 
     // 投稿者（代理で投稿するときに、表示する人を選ぶ）。新規は自分、編集は今の投稿者
-    var authorEnabled = AppSF.authorFieldAvailable();
+    // 代理投稿は、Salesforce上の所有者を変えるため管理者（CaseShelf管理者の権限セットを持つ人）だけが行える
+    var authorEnabled = AppSF.authorFieldAvailable() && store.isAdmin;
     var creatorEmail = existing ? existing.creatorEmail : (store.currentUser && store.currentUser.email) || "";
     var _author = useState(existing ? existing.authorEmail : creatorEmail);
     var authorEmail = _author[0],
@@ -1545,6 +1546,8 @@ window.AppPages = (function () {
             ? ""
             : authorEmail
           : undefined,
+        // 選んだ投稿者を、Salesforce上の投稿の所有者にする（代理投稿）
+        ownerEmail: authorEnabled ? authorEmail : undefined,
         designStaff: departments.reduce(function (acc, d) {
           return acc.concat(
             AppSF.splitNames(staff[d]).map(function (name) {
@@ -1713,8 +1716,8 @@ window.AppPages = (function () {
             h(
               "div",
               { className: "hint" },
-              "案件の担当者に代わって投稿するときは、担当者を選んでください。一覧・詳細・タイムラインには、ここで選んだ人が投稿者として表示されます。" +
-                "（編集・削除できるのは、実際に投稿した人と管理者です）"
+              "案件の担当者に代わって投稿するときは、担当者を選んでください。選んだ人がこの投稿の所有者になり、" +
+                "投稿者として表示され（マイページにも表示）、編集・削除できるようになります。"
             )
           )
         : null,

@@ -375,10 +375,10 @@
       if (!currentUser || !project || project.isSample) return false;
       var mySfId = profileRef.current && profileRef.current.sfUserId;
       if (isAdmin) return true;
-      // 編集・削除できるのは、実際に投稿した人（Salesforceのレコードの作成者）と管理者。
-      // 代理投稿で「投稿者」に選ばれた人は、Salesforceの権限上は編集できないため含めない
-      if (mySfId && project.createdById) return project.createdById === mySfId;
-      return lower(project.creatorEmail) === lower(currentUser.email);
+      // 編集・削除できるのは、Salesforce上の投稿の所有者と管理者。
+      // 代理投稿では、投稿者に選ばれた人が所有者になる（代理で投稿した人は、投稿後は編集できない）
+      if (mySfId && project.ownerId) return project.ownerId === mySfId;
+      return lower(project.ownerEmail || project.creatorEmail) === lower(currentUser.email);
     }
 
     function wrap(promise) {
@@ -393,10 +393,37 @@
     }
 
     // payload.photos: [{ id, size, dataUrl? }]
+    // 代理投稿：投稿者に選んだ人を、Salesforce上の投稿の所有者にする。
+    // 所有者を変えられなくても投稿自体は保存済みなので、その旨を知らせて続ける
+    function transferOwnerIfNeeded(postId, targetEmail) {
+      var target = lower(targetEmail);
+      var post = posts.find(function (p) {
+        return p.id === postId;
+      });
+      return AppSF.loadPosts().then(function (list) {
+        var saved = list.find(function (p) {
+          return p.id === postId;
+        });
+        var current = lower((saved && saved.ownerEmail) || (post && post.ownerEmail));
+        if (!target || !saved || target === current) return list;
+        return AppSF.changePostOwner(postId, target).then(
+          function () {
+            return AppSF.loadPosts();
+          },
+          function (e) {
+            toast("投稿は保存しましたが、所有者を変更できませんでした（" + e.message + "）", "error");
+            return list;
+          }
+        );
+      });
+    }
+
+    // payload.photos: [{ id, size, dataUrl? }]。payload.ownerEmail: 所有者にする人（代理投稿）
     function addProject(payload) {
       return wrap(
         AppSF.createPost(payload).then(function (id) {
-          return reloadPosts().then(function () {
+          return transferOwnerIfNeeded(id, payload.ownerEmail).then(function (list) {
+            setPosts(list);
             return { id: id };
           });
         })
@@ -406,7 +433,9 @@
     function updateProject(id, payload, removedPhotoIds) {
       return wrap(
         AppSF.updatePost(id, payload, removedPhotoIds).then(function () {
-          return reloadPosts();
+          return transferOwnerIfNeeded(id, payload.ownerEmail).then(function (list) {
+            setPosts(list);
+          });
         })
       );
     }
