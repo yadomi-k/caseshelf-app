@@ -147,7 +147,6 @@ window.AppSF = (function () {
       creatorEmail: creatorEmail,
       createdById: r.CreatedById || "",
       authorName: r.AuthorEmail__c ? "" : (r.CreatedBy && r.CreatedBy.Name) || "",
-      onBehalf: !!r.AuthorEmail__c && r.AuthorEmail__c.toLowerCase() !== creatorEmail.toLowerCase(),
       designStaff: parseDesignStaff(r.DesignStaff__c),
     };
   }

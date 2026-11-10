@@ -1084,10 +1084,7 @@ window.AppPages = (function () {
           h("span", null, "·"),
           h("span", null, AppUtils.formatDateTime(project.createdAt)),
           project.propertyNo ? h("span", null, "·") : null,
-          project.propertyNo ? h("span", null, "物件No " + project.propertyNo) : null,
-          project.onBehalf
-            ? h("span", { className: "on-behalf" }, "（" + store.creatorOf(project).displayName + " さんが代理で投稿）")
-            : null
+          project.propertyNo ? h("span", null, "物件No " + project.propertyNo) : null
         ),
         h(DesignStaffList, { staff: project.designStaff, store: store }),
         h(

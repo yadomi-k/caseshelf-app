@@ -353,14 +353,6 @@
       return u || { displayName: project.authorName || project.authorEmail || "不明な利用者", email: project.authorEmail || "" };
     }
 
-    // 実際に投稿した人（代理投稿のとき、詳細画面に「○○さんが代理で投稿」と出すため）
-    function creatorOf(project) {
-      var u = users.find(function (x) {
-        return lower(x.email) === lower(project.creatorEmail);
-      });
-      return u || { displayName: project.creatorEmail || "不明な利用者", email: project.creatorEmail || "" };
-    }
-
     // デザイン担当者に対応する CaseShelf の利用者（Salesforceのメールアドレスで結び付ける。
     // メールアドレスが無いときは、表示名が同じ人が1人だけならその人）。見つからなければ null
     function userForStaff(person) {
@@ -833,7 +825,6 @@
       currentUser: currentUser,
       isAdmin: isAdmin,
       authorOf: authorOf,
-      creatorOf: creatorOf,
       userForStaff: userForStaff,
       canEdit: canEdit,
       loginWithSalesforce: loginWithSalesforce,

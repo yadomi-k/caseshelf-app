@@ -1628,6 +1628,4 @@ body.no-scroll { overflow: hidden; }
   .staff-row { grid-template-columns: 1fr; gap: 0.25rem; }
 }
 
-/* 代理投稿の表示 */
-.on-behalf { font-size: 0.75rem; color: var(--color-text-dim); }
 select.text-input { appearance: auto; background: var(--color-surface); }
