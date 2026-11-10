@@ -343,6 +343,8 @@ window.AppSSO = (function () {
     return {
       object: o.object || "Opportunity",
       propertyNoField: o.propertyNoField || "",
+      // 物件種別（ハッシュタグに自動入力する）。空なら使わない
+      propertyTypeField: o.propertyTypeField === undefined ? "PropertyType__c" : o.propertyTypeField || "",
     };
   }
 
@@ -368,11 +370,24 @@ window.AppSSO = (function () {
     if (!/^[A-Za-z0-9_]+$/.test(oc.propertyNoField) || !/^[A-Za-z0-9_]+$/.test(oc.object)) {
       return Promise.reject(new Error("src/config.js の salesforceOpportunity の設定が正しくありません。"));
     }
-    var q =
-      "SELECT Id, Name FROM " + oc.object +
-      " WHERE " + oc.propertyNoField + " = " + soqlString(no) +
-      " LIMIT 2";
-    return api("GET", "/query?q=" + encodeURIComponent(q))
+    var typeField = /^[A-Za-z0-9_]+$/.test(oc.propertyTypeField) && !propertyTypeUnavailable ? oc.propertyTypeField : "";
+    function run(withType) {
+      var q =
+        "SELECT Id, Name" + (withType ? ", " + typeField : "") + " FROM " + oc.object +
+        " WHERE " + oc.propertyNoField + " = " + soqlString(no) +
+        " LIMIT 2";
+      return api("GET", "/query?q=" + encodeURIComponent(q));
+    }
+    return run(!!typeField)
+      .catch(function (e) {
+        // 物件種別の項目が無い・参照できない場合は、物件種別なしで検索する
+        if (typeField && e.code === "INVALID_FIELD" && e.message.indexOf(typeField) !== -1) {
+          propertyTypeUnavailable = true;
+          typeField = "";
+          return run(false);
+        }
+        throw e;
+      })
       .catch(function (e) {
         if (e.code === "INVALID_FIELD" || e.code === "INVALID_TYPE") {
           throw new Error("物件Noの項目名の設定が正しくありません。src/config.js の salesforceOpportunity.propertyNoField を確認してください。");
@@ -383,8 +398,30 @@ window.AppSSO = (function () {
         var recs = (body && body.records) || [];
         if (!recs.length) return null;
         var r = recs[0];
-        return { id: r.Id, name: r.Name || "", url: recordUrl(oc.object, r.Id), multiple: recs.length > 1 };
+        return {
+          id: r.Id,
+          name: r.Name || "",
+          url: recordUrl(oc.object, r.Id),
+          multiple: recs.length > 1,
+          propertyTypes: typeField ? cleanPropertyTypes(r[typeField]) : [],
+        };
       });
+  }
+
+  // 物件種別の値から、先頭（または末尾）の「番号と/」を除く。例: "01/展示会" → "展示会"
+  // 複数選択の選択リスト（「;」区切り）にも対応する
+  var propertyTypeUnavailable = false;
+  function cleanPropertyTypes(value) {
+    if (value === null || value === undefined) return [];
+    return String(value)
+      .split(";")
+      .map(function (v) {
+        return v
+          .replace(/^[\s0-9０-９]+[\s.．_\-ー]*[/／]\s*/, "")
+          .replace(/\s*[/／][\s.．_\-ー]*[0-9０-９]+\s*$/, "")
+          .trim();
+      })
+      .filter(Boolean);
   }
 
   return {
@@ -394,6 +431,7 @@ window.AppSSO = (function () {
     soqlString: soqlString,
     recordUrl: recordUrl,
     searchOpportunityByPropertyNo: searchOpportunityByPropertyNo,
+    cleanPropertyTypes: cleanPropertyTypes,
     isConfigured: isConfigured,
     startLogin: startLogin,
     consumeRedirect: consumeRedirect,

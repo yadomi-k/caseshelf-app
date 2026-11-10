@@ -247,7 +247,8 @@ window.AppComponents = (function () {
   }
 
   function TopBar(props) {
-    // props: title, onBack, active, isAdmin, right(node)
+    // props: onBack, active, isAdmin, right(node)
+    // 画面名（案件詳細・タイムラインなど）は出さず、常にロゴと「CaseShelf」を表示する
     return h(
       "header",
       { className: "topbar" },
@@ -255,19 +256,27 @@ window.AppComponents = (function () {
         ? h(
             "button",
             {
-              className: "topbar-icon-btn",
+              type: "button",
+              className: "back-btn",
               onClick: props.onBack,
               "aria-label": "戻る",
+              title: "戻る",
             },
-            "←"
+            h(
+              "svg",
+              { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2.4, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true },
+              h("path", { d: "M19 12H5" }),
+              h("path", { d: "M11 6l-6 6 6 6" })
+            )
           )
-        : h(
-            "a",
-            { className: "brand", href: "#/feed" },
-            h(Logo, { size: 20 }),
-            "CaseShelf"
-          ),
-      props.title ? h("div", { className: "title" }, props.title) : h("div", { className: "topbar-spacer" }),
+        : null,
+      h(
+        "a",
+        { className: "brand", href: "#/timeline" },
+        h(Logo, { size: 20 }),
+        "CaseShelf"
+      ),
+      h("div", { className: "topbar-spacer" }),
       h(DesktopNav, { active: props.active, isAdmin: props.isAdmin, pendingCount: props.pendingCount }),
       props.right || null
     );

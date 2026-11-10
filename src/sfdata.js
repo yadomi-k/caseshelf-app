@@ -113,12 +113,18 @@ window.AppSF = (function () {
       .filter(Boolean);
   }
 
-  // 投稿に「デザイン担当者」の項目（DesignStaff__c）があるか。
-  // Salesforceに項目を追加する前でも他の機能が動くよう、無い場合はこの項目を使わない
-  var hasDesignStaffField = true;
+  // 後から追加した投稿の項目。Salesforceに項目を追加する前でも他の機能が動くよう、
+  // 読み込みで「項目が無い」エラーになったものは使わない（true = 使える）
+  var optionalPostFields = {
+    DesignStaff__c: true, // デザイン担当者
+    AuthorEmail__c: true, // 投稿者（代理で投稿したときに表示する人のメールアドレス）
+  };
+  var hasDesignStaffField = true; // optionalPostFields.DesignStaff__c と同じ（読み込み後に更新）
 
   function toPost(r) {
     var photos = parsePhotos(r.Photos__c);
+    var creatorEmail = (r.CreatedBy && r.CreatedBy.Email) || "";
+    var authorEmail = r.AuthorEmail__c || creatorEmail;
     return {
       id: r.Id,
       title: r.Title__c || "",
@@ -135,9 +141,13 @@ window.AppSF = (function () {
       salesforceUrl: r.SalesforceUrl__c || "",
       createdAt: r.CreatedDate,
       updatedAt: r.LastModifiedDate,
-      authorEmail: (r.CreatedBy && r.CreatedBy.Email) || "",
+      // 投稿者（表示する人）。代理で投稿したときは選んだ人、そうでなければ投稿した人
+      authorEmail: authorEmail,
+      // 実際に投稿した人（Salesforceのレコードの作成者。編集・削除できるのはこの人と管理者）
+      creatorEmail: creatorEmail,
       createdById: r.CreatedById || "",
-      authorName: (r.CreatedBy && r.CreatedBy.Name) || "",
+      authorName: r.AuthorEmail__c ? "" : (r.CreatedBy && r.CreatedBy.Name) || "",
+      onBehalf: !!r.AuthorEmail__c && r.AuthorEmail__c.toLowerCase() !== creatorEmail.toLowerCase(),
       designStaff: parseDesignStaff(r.DesignStaff__c),
     };
   }
@@ -156,6 +166,9 @@ window.AppSF = (function () {
       ),
       CoverPhotoId__c: payload.coverPhotoId || "",
     };
+    if (optionalPostFields.AuthorEmail__c && payload.authorEmail !== undefined) {
+      f.AuthorEmail__c = payload.authorEmail || "";
+    }
     if (hasDesignStaffField) {
       f.DesignStaff__c = JSON.stringify(
         (payload.designStaff || [])
@@ -191,24 +204,36 @@ window.AppSF = (function () {
 
   function loadPosts() {
     function run() {
+      var extra = Object.keys(optionalPostFields).filter(function (k) {
+        return optionalPostFields[k];
+      });
       return query(
         "SELECT Id, Title__c, Description__c, Tags__c, PropertyNo__c, SalesforceUrl__c, Photos__c, CoverPhotoId__c, " +
-          (hasDesignStaffField ? "DesignStaff__c, " : "") +
+          extra.map(function (k) { return k + ", "; }).join("") +
           "CreatedDate, LastModifiedDate, CreatedById, CreatedBy.Email, CreatedBy.Name FROM " + OBJ.post + " ORDER BY CreatedDate DESC"
       );
     }
-    return run()
-      .catch(function (e) {
-        // 「デザイン担当者」の項目がまだ無い（または参照できない）場合は、その項目なしで読み込む
-        if (hasDesignStaffField && e.code === "INVALID_FIELD" && /DesignStaff__c/.test(e.message)) {
-          hasDesignStaffField = false;
-          return run();
+    function attempt() {
+      return run().catch(function (e) {
+        // 後から追加した項目がまだ無い（または参照できない）場合は、その項目なしで読み込み直す
+        if (e.code === "INVALID_FIELD") {
+          var missing = Object.keys(optionalPostFields).filter(function (k) {
+            return optionalPostFields[k] && e.message.indexOf(k) !== -1;
+          });
+          if (missing.length) {
+            missing.forEach(function (k) {
+              optionalPostFields[k] = false;
+            });
+            hasDesignStaffField = optionalPostFields.DesignStaff__c;
+            return attempt();
+          }
         }
         throw e;
-      })
-      .then(function (rs) {
-        return rs.map(toPost);
       });
+    }
+    return attempt().then(function (rs) {
+      return rs.map(toPost);
+    });
   }
 
   // ------------------------------------------------------------------
@@ -524,6 +549,9 @@ window.AppSF = (function () {
     loadPosts: loadPosts,
     designStaffAvailable: function () {
       return hasDesignStaffField;
+    },
+    authorFieldAvailable: function () {
+      return optionalPostFields.AuthorEmail__c;
     },
     designDepartments: function () {
       return designConfig().departments;

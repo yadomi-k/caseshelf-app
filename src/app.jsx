@@ -64,17 +64,6 @@
     return { name: "notfound", params: {} };
   }
 
-  var ROUTE_TITLES = {
-    feed: null,
-    timeline: "タイムライン",
-    project: "案件詳細",
-    new: "案件を投稿",
-    edit: "案件を編集",
-    saved: "保存した案件",
-    profile: "マイページ",
-    admin: "管理者画面",
-  };
-
   // ---------------- トースト ----------------
   function useToasts() {
     var _t = useState([]);
@@ -361,7 +350,15 @@
         users.find(function (x) {
           return x.id === project.authorId;
         });
-      return u || { displayName: project.authorName || "不明な利用者", email: project.authorEmail || "" };
+      return u || { displayName: project.authorName || project.authorEmail || "不明な利用者", email: project.authorEmail || "" };
+    }
+
+    // 実際に投稿した人（代理投稿のとき、詳細画面に「○○さんが代理で投稿」と出すため）
+    function creatorOf(project) {
+      var u = users.find(function (x) {
+        return lower(x.email) === lower(project.creatorEmail);
+      });
+      return u || { displayName: project.creatorEmail || "不明な利用者", email: project.creatorEmail || "" };
     }
 
     // デザイン担当者に対応する CaseShelf の利用者（Salesforceのメールアドレスで結び付ける。
@@ -385,7 +382,11 @@
     function canEdit(project) {
       if (!currentUser || !project || project.isSample) return false;
       var mySfId = profileRef.current && profileRef.current.sfUserId;
-      return project.authorId === currentUser.id || (!!mySfId && project.createdById === mySfId) || isAdmin;
+      if (isAdmin) return true;
+      // 編集・削除できるのは、実際に投稿した人（Salesforceのレコードの作成者）と管理者。
+      // 代理投稿で「投稿者」に選ばれた人は、Salesforceの権限上は編集できないため含めない
+      if (mySfId && project.createdById) return project.createdById === mySfId;
+      return lower(project.creatorEmail) === lower(currentUser.email);
     }
 
     function wrap(promise) {
@@ -832,6 +833,7 @@
       currentUser: currentUser,
       isAdmin: isAdmin,
       authorOf: authorOf,
+      creatorOf: creatorOf,
       userForStaff: userForStaff,
       canEdit: canEdit,
       loginWithSalesforce: loginWithSalesforce,
@@ -1001,7 +1003,6 @@
       { className: "app-shell" },
       h(C.ProtoBanner, null),
       h(C.TopBar, {
-        title: ROUTE_TITLES[route.name],
         onBack: showBack ? handleBack : null,
         active: activeNavKey,
         isAdmin: store.isAdmin,
