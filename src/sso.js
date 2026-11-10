@@ -243,13 +243,38 @@ window.AppSSO = (function () {
     } catch (e) {}
   }
 
+  // オブジェクトを参照できないときの案内（利用者が自分で読んで、誰に何を頼めばよいかわかる文にする）
+  var OBJECT_LABELS = {
+    Opportunity: "商談",
+    OpportunityLineItem: "商談商品",
+    Product2: "商品",
+    Creative_Achievements__c: "プロジェクト管理",
+  };
+  function objectAccessMessage(objectName) {
+    if (/^CaseShelf_/i.test(objectName)) {
+      return (
+        "このSalesforceアカウントには、CaseShelfを使う権限（権限セット「CaseShelf利用者」）が付いていません。" +
+        "Salesforceの管理者に、権限セット「CaseShelf利用者」の割り当てを依頼してください。" +
+        "（割り当て後も表示される場合は、Salesforceのユーザーライセンスでカスタムオブジェクトが使えるか確認してください）"
+      );
+    }
+    var label = OBJECT_LABELS[objectName] || objectName;
+    return (
+      "このSalesforceアカウントには、Salesforceの「" + label + "」を参照する権限がありません。" +
+      "必要な場合は、Salesforceの管理者に参照権限の付与を依頼してください。"
+    );
+  }
+
   function apiError(res, body) {
     var first = Array.isArray(body) ? body[0] : body;
     var code = (first && first.errorCode) || String(res.status);
     var msg = (first && first.message) || "";
     var text;
-    if (code === "NOT_FOUND" && /sObject type/i.test(msg)) {
-      text = "Salesforceに CaseShelf 用のオブジェクトが見つかりません。Salesforceの設定（docs/salesforce-setup.md）が完了しているか、権限セットが付与されているか確認してください。";
+    // 「sObject type 'xxx' is not supported」等：そのオブジェクトがこのユーザーから見えない
+    // （権限セットが付いていない、ライセンスで使えない、またはオブジェクトが未作成）
+    var objMatch = /sObject type '([^']+)'/i.exec(msg);
+    if (objMatch && (code === "INVALID_TYPE" || code === "NOT_FOUND")) {
+      text = objectAccessMessage(objMatch[1]);
     } else if (code === "INVALID_TYPE" || code === "INVALID_FIELD") {
       text = "Salesforceのオブジェクト・項目の設定が正しくありません（" + msg + "）。docs/salesforce-setup.md を確認してください。";
     } else if (code === "INSUFFICIENT_ACCESS_OR_READONLY" || code === "INSUFFICIENT_ACCESS" || code === "INSUFFICIENT_ACCESS_ON_CROSS_REFERENCE_ENTITY") {
