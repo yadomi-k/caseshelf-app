@@ -734,6 +734,25 @@ window.AppPages = (function () {
     );
   }
 
+  // 利用者のページへのリンク。CaseShelf に登録されている人だけリンクにし、未登録の人は名前の表示だけにする
+  function userHref(store, user) {
+    if (!user || !user.id) return null;
+    var registered = store.users.some(function (u) {
+      return u.id === user.id;
+    });
+    if (!registered) return null;
+    return store.currentUser && store.currentUser.id === user.id ? "#/profile" : "#/user/" + encodeURIComponent(user.id);
+  }
+  function UserLink(props) {
+    var href = userHref(props.store, props.user);
+    if (!href) return h("span", { className: props.className, title: props.title }, props.children);
+    return h(
+      "a",
+      { className: cx(props.className, "user-link"), href: href, title: props.title || props.user.displayName + " さんのページを見る" },
+      props.children
+    );
+  }
+
   // デザイン担当者の表示（案件詳細・タイムライン）。
   // CaseShelf の利用者と結び付いた人は、プロフィール画像と CaseShelf の表示名で表示する
   function DesignStaffList(props) {
@@ -765,11 +784,13 @@ window.AppPages = (function () {
             g.people.map(function (p, i) {
               var u = store.userForStaff(p);
               return h(
-                "span",
+                UserLink,
                 {
                   key: p.name + i,
+                  store: store,
+                  user: u,
                   className: cx("design-staff-person", u && "linked"),
-                  title: u ? "CaseShelfの利用者: " + u.displayName : p.name + "（CaseShelf未登録）",
+                  title: u ? u.displayName + " さんのページを見る" : p.name + "（CaseShelf未登録）",
                 },
                 h(C.Avatar, { user: u || { displayName: p.name }, size: "sm" }),
                 h("span", { className: "design-staff-name" }, u ? u.displayName : p.name)
@@ -817,11 +838,11 @@ window.AppPages = (function () {
       h(
         "header",
         { className: "tl-head" },
-        h(C.Avatar, { user: author, size: "sm" }),
+        h(UserLink, { store: store, user: author, className: "tl-avatar-link" }, h(C.Avatar, { user: author, size: "sm" })),
         h(
           "div",
           { className: "tl-head-text" },
-          h("div", { className: "tl-author" }, author.displayName),
+          h("div", { className: "tl-author" }, h(UserLink, { store: store, user: author }, author.displayName)),
           h(
             "div",
             { className: "tl-meta" },
@@ -1079,8 +1100,12 @@ window.AppPages = (function () {
         h(
           "div",
           { className: "detail-author-row" },
-          h(C.Avatar, { user: author, size: "sm" }),
-          h("span", null, author.displayName),
+          h(
+            UserLink,
+            { store: store, user: author, className: "detail-author" },
+            h(C.Avatar, { user: author, size: "sm" }),
+            h("span", null, author.displayName)
+          ),
           h("span", null, "·"),
           h("span", null, AppUtils.formatDateTime(project.createdAt)),
           project.propertyNo ? h("span", null, "·") : null,
@@ -1694,25 +1719,15 @@ window.AppPages = (function () {
             "div",
             { className: "field" },
             h("label", { htmlFor: "post-author" }, "投稿者"),
-            h(
-              "select",
-              {
-                id: "post-author",
-                className: "text-input",
-                value: authorEmail,
-                onChange: function (e) {
-                  setAuthorEmail(e.target.value);
-                },
+            h(C.UserPicker, {
+              id: "post-author",
+              users: authorChoices,
+              value: authorEmail,
+              onChange: setAuthorEmail,
+              suffixFor: function (u) {
+                return String(u.email).toLowerCase() === String(creatorEmail).toLowerCase() ? (isEdit ? "（実際に投稿した人）" : "（自分）") : "";
               },
-              authorChoices.map(function (u) {
-                var mine = String(u.email).toLowerCase() === String(creatorEmail).toLowerCase();
-                return h(
-                  "option",
-                  { key: u.email, value: u.email },
-                  u.displayName + (mine ? (isEdit ? "（実際に投稿した人）" : "（自分）") : "")
-                );
-              })
-            ),
+            }),
             h(
               "div",
               { className: "hint" },
@@ -1975,11 +1990,7 @@ window.AppPages = (function () {
       setName = _name[1];
     var avatarInputRef = useRef(null);
 
-    var myProjects = sortNewestFirst(
-      store.projects.filter(function (p) {
-        return p.authorId === user.id;
-      })
-    );
+    var myProjects = postsBy(store, user);
     var savedCount = store.savedIds.length;
 
     function onAvatarFile(e) {
@@ -2093,16 +2104,135 @@ window.AppPages = (function () {
           h("div", { className: "email" }, user.email)
         )
       ),
+      h(ProfilePosts, {
+        store: store,
+        user: user,
+        extraStat: h("div", null, h("b", null, savedCount), " 件の保存"),
+        emptyPosts: "まだ案件を投稿していません。",
+      })
+    );
+  }
+
+  // 利用者が投稿した案件（代理投稿では、投稿者に選ばれた人の投稿）
+  function postsBy(store, user) {
+    return sortNewestFirst(
+      store.projects.filter(function (p) {
+        return p.authorId === user.id;
+      })
+    );
+  }
+  // 利用者がデザイン担当した案件
+  function designedBy(store, user) {
+    return sortNewestFirst(
+      store.projects.filter(function (p) {
+        return (p.designStaff || []).some(function (d) {
+          var u = store.userForStaff(d);
+          return u && u.id === user.id;
+        });
+      })
+    );
+  }
+
+  // マイページ・利用者のページの「投稿」「デザイン担当」の切り替えと一覧
+  function ProfilePosts(props) {
+    var store = props.store;
+    var user = props.user;
+    var posts = postsBy(store, user);
+    var designed = designedBy(store, user);
+    var _tab = useState("posts");
+    var tab = _tab[0],
+      setTab = _tab[1];
+    var list = tab === "posts" ? posts : designed;
+    return h(
+      React.Fragment,
+      null,
       h(
         "div",
         { className: "profile-stats" },
-        h("div", null, h("b", null, myProjects.length), " 件の投稿"),
-        h("div", null, h("b", null, savedCount), " 件の保存")
+        h("div", null, h("b", null, posts.length), " 件の投稿"),
+        h("div", null, h("b", null, designed.length), " 件のデザイン担当"),
+        props.extraStat || null
+      ),
+      h(
+        "div",
+        { className: "profile-tabs", role: "tablist" },
+        [
+          { key: "posts", label: "投稿", count: posts.length },
+          { key: "designed", label: "デザイン担当", count: designed.length },
+        ].map(function (t) {
+          return h(
+            "button",
+            {
+              key: t.key,
+              type: "button",
+              role: "tab",
+              "aria-selected": tab === t.key,
+              className: cx("profile-tab", tab === t.key && "active"),
+              onClick: function () {
+                setTab(t.key);
+              },
+            },
+            t.label,
+            h("span", { className: "profile-tab-count" }, t.count)
+          );
+        })
       ),
       h(C.PhotoGrid, {
-        projects: myProjects,
+        key: tab,
+        projects: list,
         reactionsFor: store.reactionsAvailable ? store.reactionsFor : null,
-        emptyMessage: "まだ案件を投稿していません。",
+        emptyMessage: tab === "posts" ? props.emptyPosts : "デザイン担当した案件はまだありません。",
+      })
+    );
+  }
+
+  // 他の利用者のページ（閲覧のみ）
+  function UserPage(props) {
+    var store = props.store;
+    var id = props.route.params.id;
+    var user = store.users.find(function (u) {
+      return u.id === id;
+    });
+    useEffect(
+      function () {
+        window.scrollTo(0, 0);
+        // 自分のページはマイページへ
+        if (user && store.currentUser && user.id === store.currentUser.id) props.route.navigate("/profile", { replace: true });
+      },
+      [id]
+    );
+    if (!user) {
+      return h(
+        "div",
+        { className: "empty-state" },
+        h("div", null, "この利用者は見つかりませんでした。"),
+        h("a", { className: "btn primary", href: "#/timeline" }, "タイムラインへ戻る")
+      );
+    }
+    return h(
+      React.Fragment,
+      null,
+      h(
+        "div",
+        { className: "profile-header" },
+        h(C.Avatar, { user: user, size: "lg" }),
+        h(
+          "div",
+          { className: "info" },
+          h(
+            "div",
+            { className: "display-name" },
+            user.displayName,
+            user.status === "suspended" ? h("span", { className: "status-pill suspended", style: { marginLeft: "0.5rem" } }, "利用停止中") : null
+          ),
+          h("div", { className: "email" }, user.email)
+        )
+      ),
+      h(ProfilePosts, {
+        key: user.id,
+        store: store,
+        user: user,
+        emptyPosts: user.displayName + " さんの投稿はまだありません。",
       })
     );
   }
@@ -2522,6 +2652,7 @@ window.AppPages = (function () {
     PostFormPage: PostFormPage,
     SavedPage: SavedPage,
     ProfilePage: ProfilePage,
+    UserPage: UserPage,
     AdminPage: AdminPage,
     NotFoundPage: NotFoundPage,
   };

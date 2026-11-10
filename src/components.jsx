@@ -184,6 +184,199 @@ window.AppComponents = (function () {
     );
   }
 
+  // 利用者を文字で検索して選ぶ入力欄（利用者が多くても探せるように）
+  // props: users [{id, email, displayName, avatarVersionId}], value（選択中のメールアドレス）, onChange(email),
+  //        id, suffixFor(user) → 名前の後ろに付ける文字（例「（自分）」）, maxResults
+  function normalizeForSearch(s) {
+    return String(s || "")
+      .toLowerCase()
+      .replace(/[\s\u3000]+/g, "")
+      // 全角英数字を半角に
+      .replace(/[Ａ-Ｚａ-ｚ０-９＠．]/g, function (c) {
+        return String.fromCharCode(c.charCodeAt(0) - 0xfee0);
+      });
+  }
+
+  function UserPicker(props) {
+    var users = props.users || [];
+    var maxResults = props.maxResults || 30;
+    var _open = React.useState(false);
+    var open = _open[0],
+      setOpen = _open[1];
+    var _q = React.useState("");
+    var q = _q[0],
+      setQ = _q[1];
+    var _active = React.useState(0);
+    var active = _active[0],
+      setActive = _active[1];
+    var wrapRef = React.useRef(null);
+    var inputRef = React.useRef(null);
+    var listRef = React.useRef(null);
+
+    var selected = users.find(function (u) {
+      return String(u.email).toLowerCase() === String(props.value || "").toLowerCase();
+    });
+
+    var matches = React.useMemo(
+      function () {
+        var key = normalizeForSearch(q);
+        var list = !key
+          ? users
+          : users.filter(function (u) {
+              return normalizeForSearch(u.displayName).indexOf(key) !== -1 || normalizeForSearch(u.email).indexOf(key) !== -1;
+            });
+        return list;
+      },
+      [users, q]
+    );
+    var shown = matches.slice(0, maxResults);
+
+    // 外を押したら閉じる
+    React.useEffect(
+      function () {
+        if (!open) return;
+        function onDown(e) {
+          if (wrapRef.current && !wrapRef.current.contains(e.target)) {
+            setOpen(false);
+            setQ("");
+          }
+        }
+        document.addEventListener("mousedown", onDown);
+        document.addEventListener("touchstart", onDown);
+        return function () {
+          document.removeEventListener("mousedown", onDown);
+          document.removeEventListener("touchstart", onDown);
+        };
+      },
+      [open]
+    );
+
+    // 選択中の候補が見えるようにスクロールする
+    React.useEffect(
+      function () {
+        if (!open || !listRef.current) return;
+        var el = listRef.current.children[active];
+        if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+      },
+      [active, open]
+    );
+
+    function choose(u) {
+      props.onChange(u.email);
+      setOpen(false);
+      setQ("");
+      if (inputRef.current) inputRef.current.blur();
+    }
+
+    function onKeyDown(e) {
+      if (e.nativeEvent && e.nativeEvent.isComposing) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setOpen(true);
+        setActive(function (i) {
+          return Math.min(shown.length - 1, i + 1);
+        });
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActive(function (i) {
+          return Math.max(0, i - 1);
+        });
+      } else if (e.key === "Enter") {
+        // フォームを送信しない
+        e.preventDefault();
+        if (open && shown[active]) choose(shown[active]);
+      } else if (e.key === "Escape") {
+        setOpen(false);
+        setQ("");
+      }
+    }
+
+    var suffix = function (u) {
+      return props.suffixFor ? props.suffixFor(u) || "" : "";
+    };
+
+    return h(
+      "div",
+      { className: cx("user-picker", open && "open"), ref: wrapRef },
+      h(
+        "div",
+        { className: "user-picker-field" },
+        !open && selected ? h(Avatar, { user: selected, size: "sm" }) : h("span", { className: "user-picker-icon", "aria-hidden": true }, "🔍"),
+        h("input", {
+          id: props.id,
+          ref: inputRef,
+          className: "user-picker-input",
+          type: "text",
+          role: "combobox",
+          autoComplete: "off",
+          "aria-expanded": open,
+          "aria-autocomplete": "list",
+          value: open ? q : selected ? selected.displayName + suffix(selected) : props.value || "",
+          placeholder: open ? "名前またはメールアドレスで検索" : "投稿者を選択",
+          onFocus: function () {
+            setOpen(true);
+            setQ("");
+            setActive(0);
+          },
+          onChange: function (e) {
+            setQ(e.target.value);
+            setOpen(true);
+            setActive(0);
+          },
+          onKeyDown: onKeyDown,
+        }),
+        !open && selected ? h("span", { className: "user-picker-email" }, selected.email) : null
+      ),
+      open
+        ? h(
+            "div",
+            { className: "user-picker-pop" },
+            shown.length
+              ? h(
+                  "ul",
+                  { className: "user-picker-list", role: "listbox", ref: listRef },
+                  shown.map(function (u, i) {
+                    var isSel = selected && selected.email === u.email;
+                    return h(
+                      "li",
+                      {
+                        key: u.email,
+                        role: "option",
+                        "aria-selected": isSel,
+                        className: cx("user-picker-item", i === active && "active", isSel && "selected"),
+                        onMouseDown: function (e) {
+                          // 入力欄のフォーカスが外れる前に選ぶ
+                          e.preventDefault();
+                          choose(u);
+                        },
+                        onMouseEnter: function () {
+                          setActive(i);
+                        },
+                      },
+                      h(Avatar, { user: u, size: "sm" }),
+                      h(
+                        "span",
+                        { className: "user-picker-text" },
+                        h("span", { className: "user-picker-name" }, u.displayName + suffix(u)),
+                        h("span", { className: "user-picker-mail" }, u.email)
+                      ),
+                      isSel ? h("span", { className: "user-picker-check", "aria-hidden": true }, "✓") : null
+                    );
+                  })
+                )
+              : h("div", { className: "user-picker-empty" }, "「" + q + "」に一致する利用者がいません"),
+            matches.length > shown.length
+              ? h(
+                  "div",
+                  { className: "user-picker-more" },
+                  "ほか " + (matches.length - shown.length) + " 名。名前を入力して絞り込んでください"
+                )
+              : null
+          )
+        : null
+    );
+  }
+
   function ProtoBanner(props) {
     return h(
       "div",
@@ -806,6 +999,7 @@ window.AppComponents = (function () {
     Chip: Chip,
     MultiBadge: MultiBadge,
     PhotoCarousel: PhotoCarousel,
+    UserPicker: UserPicker,
     ReactionBar: ReactionBar,
     PhotoGrid: PhotoGrid,
     Toast: Toast,
