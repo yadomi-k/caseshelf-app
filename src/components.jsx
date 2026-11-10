@@ -223,7 +223,11 @@ window.AppComponents = (function () {
         var list = !key
           ? users
           : users.filter(function (u) {
-              return normalizeForSearch(u.displayName).indexOf(key) !== -1 || normalizeForSearch(u.email).indexOf(key) !== -1;
+              return (
+                normalizeForSearch(u.displayName).indexOf(key) !== -1 ||
+                normalizeForSearch(u.email).indexOf(key) !== -1 ||
+                normalizeForSearch(u.department).indexOf(key) !== -1
+              );
             });
         return list;
       },
@@ -312,7 +316,7 @@ window.AppComponents = (function () {
           "aria-expanded": open,
           "aria-autocomplete": "list",
           value: open ? q : selected ? selected.displayName + suffix(selected) : props.value || "",
-          placeholder: open ? "名前またはメールアドレスで検索" : "投稿者を選択",
+          placeholder: open ? "名前・部・メールアドレスで検索" : "投稿者を選択",
           onFocus: function () {
             setOpen(true);
             setQ("");
@@ -358,7 +362,7 @@ window.AppComponents = (function () {
                         "span",
                         { className: "user-picker-text" },
                         h("span", { className: "user-picker-name" }, u.displayName + suffix(u)),
-                        h("span", { className: "user-picker-mail" }, u.email)
+                        h("span", { className: "user-picker-mail" }, (u.department ? u.department + " · " : "") + u.email)
                       ),
                       isSel ? h("span", { className: "user-picker-check", "aria-hidden": true }, "✓") : null
                     );
