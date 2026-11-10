@@ -1276,7 +1276,9 @@ window.AppPages = (function () {
           .filter(function (u) {
             return u.status === "active" || String(u.email).toLowerCase() === String(authorEmail).toLowerCase();
           })
-          .slice()
+          .map(function (u) {
+            return Object.assign({}, u, { department: store.departmentOf(u) });
+          })
           .sort(function (a, b) {
             return String(a.displayName).localeCompare(String(b.displayName), "ja");
           });
@@ -2101,6 +2103,7 @@ window.AppPages = (function () {
                   "編集"
                 )
               ),
+          store.departmentOf(user) ? h("div", { className: "department" }, store.departmentOf(user)) : null,
           h("div", { className: "email" }, user.email)
         )
       ),
@@ -2139,8 +2142,12 @@ window.AppPages = (function () {
     var user = props.user;
     var posts = postsBy(store, user);
     var designed = designedBy(store, user);
+    // 「デザイン担当」はクリエイティブ部の人だけに表示する。
+    // 部署データを読めなかった場合は、デザイン担当した案件がある人にだけ表示する
+    var creative = store.isCreative(user);
+    var showDesigned = creative === null ? designed.length > 0 : creative;
     var _tab = useState("posts");
-    var tab = _tab[0],
+    var tab = showDesigned ? _tab[0] : "posts",
       setTab = _tab[1];
     var list = tab === "posts" ? posts : designed;
     return h(
@@ -2150,10 +2157,11 @@ window.AppPages = (function () {
         "div",
         { className: "profile-stats" },
         h("div", null, h("b", null, posts.length), " 件の投稿"),
-        h("div", null, h("b", null, designed.length), " 件のデザイン担当"),
+        showDesigned ? h("div", null, h("b", null, designed.length), " 件のデザイン担当") : null,
         props.extraStat || null
       ),
-      h(
+      showDesigned
+        ? h(
         "div",
         { className: "profile-tabs", role: "tablist" },
         [
@@ -2176,7 +2184,8 @@ window.AppPages = (function () {
             h("span", { className: "profile-tab-count" }, t.count)
           );
         })
-      ),
+      )
+        : null,
       h(C.PhotoGrid, {
         key: tab,
         projects: list,
@@ -2225,6 +2234,7 @@ window.AppPages = (function () {
             user.displayName,
             user.status === "suspended" ? h("span", { className: "status-pill suspended", style: { marginLeft: "0.5rem" } }, "利用停止中") : null
           ),
+          store.departmentOf(user) ? h("div", { className: "department" }, store.departmentOf(user)) : null,
           h("div", { className: "email" }, user.email)
         )
       ),

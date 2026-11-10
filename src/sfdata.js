@@ -293,6 +293,20 @@ window.AppSF = (function () {
       });
   }
 
+  // Salesforceの有効なユーザーの「部」を、メールアドレス（小文字）ごとに返す。{ email: 部 }
+  function loadUserDepartments() {
+    var c = (window.AppConfig && window.AppConfig.userDepartment) || {};
+    var field = c.field || "";
+    if (!/^[A-Za-z0-9_]+__c$/.test(field)) return Promise.reject(new Error("部の項目名の設定が正しくありません。"));
+    return query("SELECT Email, " + field + " FROM User WHERE IsActive = true AND Email != null").then(function (rs) {
+      var map = {};
+      rs.forEach(function (r) {
+        if (r.Email && r[field]) map[String(r.Email).toLowerCase()] = String(r[field]);
+      });
+      return map;
+    });
+  }
+
   // 自分の保存（ブックマーク）。[{ id, postId }]
   function loadMySaves(sfUserId) {
     var where = sfUserId ? " WHERE OwnerId = " + q(sfUserId) : "";
@@ -588,6 +602,7 @@ window.AppSF = (function () {
     findDesignStaff: findDesignStaff,
     splitNames: splitNames,
     loadMySaves: loadMySaves,
+    loadUserDepartments: loadUserDepartments,
     loadPendingRequests: loadPendingRequests,
     loadReactions: loadReactions,
     loadPostReactions: loadPostReactions,

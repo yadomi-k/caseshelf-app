@@ -30,6 +30,13 @@ window.AppConfig = {
     // プロジェクト管理の、商談商品を参照する項目（基案件）のAPI参照名
     lineItemField: "Base_opportunity__c",
   },
+  // 部署（Salesforceのユーザーの「部」）。利用者のページやマイページの表示切り替えに使う
+  userDepartment: {
+    // Salesforceのユーザーの「部」の項目のAPI参照名（※標準の Department とは別の項目）
+    field: "Department__c",
+    // 「デザイン担当」タブを表示する部（部の名前にこの文字が含まれていれば対象）
+    creativeDepartments: ["クリエイティブ部"],
+  },
   // 最初の管理者のメールアドレス（Salesforceと同じもの）。
   // この人は、CaseShelfの利用者がまだ登録されていなくても、初回ログイン時に自動で「管理者」として登録される。
   // ※Salesforce側で「CaseShelf管理者」の権限セットが付与されている必要がある

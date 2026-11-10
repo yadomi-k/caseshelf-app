@@ -138,6 +138,10 @@
     var reactionsAvailable = _reactOk[0],
       setReactionsAvailable = _reactOk[1];
     var reactionBusyRef = React.useRef({});
+    // 部署 { メールアドレス（小文字）: 部 }。読めなかった場合は null
+    var _depts = useState(null);
+    var departments = _depts[0],
+      setDepartments = _depts[1];
     var lastLoadedRef = React.useRef(0);
     var profileRef = React.useRef(null);
 
@@ -148,6 +152,7 @@
       setSaves([]);
       setRequests([]);
       setReactions([]);
+      setDepartments(null);
     }
 
     // ログインした人のデータを読み込む。
@@ -179,8 +184,14 @@
               if (e && e.status === 401) throw e;
               return null;
             }),
+            // 部署（Salesforceのユーザーの「部」）。読めなくても、ほかの機能は使えるようにする
+            AppSF.loadUserDepartments().catch(function (e) {
+              if (e && e.status === 401) throw e;
+              return null;
+            }),
           ]).then(function (r) {
             setCurrentUser(me);
+            setDepartments(r[5]);
             setUsers(r[0]);
             setPosts(r[1]);
             // 投稿が削除されて空になった保存は消す
@@ -371,6 +382,22 @@
         return String(u.displayName || "").replace(/\s+/g, "") === key;
       });
       return same.length === 1 ? same[0] : null;
+    }
+
+    // 利用者の部（Salesforceのユーザーの「部」）。不明なら ""
+    function departmentOf(user) {
+      if (!departments || !user) return "";
+      return departments[lower(user.email)] || "";
+    }
+
+    // クリエイティブ部の人か。部署データを読めなかった場合は null（不明）
+    function isCreative(user) {
+      if (!departments) return null;
+      var dept = departmentOf(user);
+      var list = ((window.AppConfig && window.AppConfig.userDepartment) || {}).creativeDepartments || [];
+      return list.some(function (d) {
+        return d && dept.indexOf(d) !== -1;
+      });
     }
 
     function canEdit(project) {
@@ -857,6 +884,8 @@
       isAdmin: isAdmin,
       authorOf: authorOf,
       userForStaff: userForStaff,
+      departmentOf: departmentOf,
+      isCreative: isCreative,
       canEdit: canEdit,
       loginWithSalesforce: loginWithSalesforce,
       requestAccount: requestAccount,

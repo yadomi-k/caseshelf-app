@@ -1204,6 +1204,7 @@ body.no-scroll { overflow: hidden; }
 }
 .profile-header .info { flex: 1; min-width: 0; }
 .profile-header .display-name { font-size: 1.0625rem; font-weight: 700; }
+.profile-header .department { font-size: 0.8125rem; color: var(--color-text); margin-top: 0.125rem; }
 .profile-header .email { font-size: 0.75rem; color: var(--color-text-dim); margin-top: 0.125rem; }
 .profile-stats { padding: 0 1rem 0.875rem; display: flex; gap: 1.125rem; font-size: 0.8125rem; color: var(--color-text-dim); }
 .profile-stats b { color: var(--color-text); }
