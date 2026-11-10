@@ -59,6 +59,8 @@
     if (pathname === "/admin") return { name: "admin", params: {} };
     m = pathname.match(/^\/project\/([^/]+)$/);
     if (m) return { name: "project", params: { id: decodeURIComponent(m[1]) } };
+    m = pathname.match(/^\/user\/([^/]+)$/);
+    if (m) return { name: "user", params: { id: decodeURIComponent(m[1]) } };
     m = pathname.match(/^\/edit\/([^/]+)$/);
     if (m) return { name: "edit", params: { id: decodeURIComponent(m[1]) } };
     return { name: "notfound", params: {} };
@@ -1006,6 +1008,9 @@
       case "saved":
         page = h(P.SavedPage, routeProps);
         break;
+      case "user":
+        page = h(P.UserPage, routeProps);
+        break;
       case "profile":
         page = h(P.ProfilePage, routeProps);
         break;
@@ -1016,7 +1021,7 @@
         page = h(P.NotFoundPage, routeProps);
     }
 
-    var showBack = route.name === "project" || route.name === "new" || route.name === "edit";
+    var showBack = route.name === "project" || route.name === "new" || route.name === "edit" || route.name === "user";
 
     return h(
       "div",
