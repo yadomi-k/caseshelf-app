@@ -263,8 +263,9 @@ CaseShelf の投稿・写真・利用者などは、Salesforce に保存しま�
 
 - 物件Noで検索すると、商談の **物件種別**（`PropertyType__c`。先頭の「番号/」を除く）と、**会場マスタ検索**（会場マスタへの参照項目）の
   会場名を、投稿の「物件種別」「会場」に自動入力します。一覧の検索・絞り込みで、物件種別・会場から探せます。
-- 会場の項目名は `src/config.js` の `salesforceOpportunity.venueField`（会場マスタ検索のAPI参照名）と
-  `venueNameField`（会場マスタの会場名の項目。通常は `Name`）で設定します。
+- 会場は、商談の「会場マスタ検索」（`Venue__c`。会場マスタ `VenueMaster__c` への参照）が指す会場の「会場名」（`Name`）です。
+  会場マスタ検索が空欄の商談では、会場は空欄のままです。
+  項目名は `src/config.js` の `salesforceOpportunity.venueField`・`venueNameField` で変更できます。
 - 物件種別の選択肢は、商談の物件種別の選択リストの値（有効なもの）から作ります。
 - CaseShelf を使う人が、商談の物件種別・会場マスタ検索と、会場マスタの会場名を参照できる必要があります。
 
