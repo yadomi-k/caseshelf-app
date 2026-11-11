@@ -118,6 +118,8 @@ window.AppSF = (function () {
   var optionalPostFields = {
     DesignStaff__c: true, // デザイン担当者
     AuthorEmail__c: true, // 投稿者（代理で投稿したときに表示する人のメールアドレス）
+    PropertyType__c: true, // 物件種別（1行に1つ）
+    Venue__c: true, // 会場名
   };
   var hasDesignStaffField = true; // optionalPostFields.DesignStaff__c と同じ（読み込み後に更新）
 
@@ -151,6 +153,13 @@ window.AppSF = (function () {
       ownerEmail: (r.Owner && r.Owner.Email) || "",
       authorName: r.AuthorEmail__c ? "" : (r.CreatedBy && r.CreatedBy.Name) || "",
       designStaff: parseDesignStaff(r.DesignStaff__c),
+      propertyTypes: String(r.PropertyType__c || "")
+        .split(/\r?\n/)
+        .map(function (t) {
+          return t.trim();
+        })
+        .filter(Boolean),
+      venue: String(r.Venue__c || "").trim(),
     };
   }
 
@@ -168,6 +177,12 @@ window.AppSF = (function () {
       ),
       CoverPhotoId__c: payload.coverPhotoId || "",
     };
+    if (optionalPostFields.PropertyType__c && payload.propertyTypes !== undefined) {
+      f.PropertyType__c = (payload.propertyTypes || []).join("\n");
+    }
+    if (optionalPostFields.Venue__c && payload.venue !== undefined) {
+      f.Venue__c = String(payload.venue || "").slice(0, 255);
+    }
     if (optionalPostFields.AuthorEmail__c && payload.authorEmail !== undefined) {
       f.AuthorEmail__c = payload.authorEmail || "";
     }
@@ -595,6 +610,12 @@ window.AppSF = (function () {
     },
     authorFieldAvailable: function () {
       return optionalPostFields.AuthorEmail__c;
+    },
+    propertyTypeFieldAvailable: function () {
+      return optionalPostFields.PropertyType__c;
+    },
+    venueFieldAvailable: function () {
+      return optionalPostFields.Venue__c;
     },
     designDepartments: function () {
       return designConfig().departments;

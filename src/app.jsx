@@ -777,6 +777,34 @@
       return out;
     })();
 
+    // 投稿で使われている物件種別・会場（重複なし・名前順）
+    var allPropertyTypes = React.useMemo(
+      function () {
+        var out = [];
+        posts.forEach(function (p) {
+          (p.propertyTypes || []).forEach(function (t) {
+            if (out.indexOf(t) === -1) out.push(t);
+          });
+        });
+        return out.sort(function (a, b) {
+          return a.localeCompare(b, "ja");
+        });
+      },
+      [posts]
+    );
+    var allVenues = React.useMemo(
+      function () {
+        var out = [];
+        posts.forEach(function (p) {
+          if (p.venue && out.indexOf(p.venue) === -1) out.push(p.venue);
+        });
+        return out.sort(function (a, b) {
+          return a.localeCompare(b, "ja");
+        });
+      },
+      [posts]
+    );
+
     var pendingRequests = requests.filter(function (r) {
       return r.status === "pending";
     });
@@ -903,6 +931,8 @@
       refreshPostReactions: refreshPostReactions,
       updateProfile: updateProfile,
       allTags: allTags,
+      allPropertyTypes: allPropertyTypes,
+      allVenues: allVenues,
       admin: admin,
       toast: toast,
     };

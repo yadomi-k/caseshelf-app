@@ -1731,3 +1731,55 @@ a.design-staff-person.linked:hover { border-color: var(--color-accent); }
   color: var(--color-text-dim);
 }
 .profile-tab.active .profile-tab-count { background: var(--color-accent-dim); color: var(--color-accent); }
+
+/* ---------- 検索サイドバーの折りたたみ ---------- */
+
+.sidebar-section.collapsible { border-top: 1px solid var(--color-border); padding-top: 0.25rem; }
+.sidebar-sec-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  border: none;
+  background: none;
+  text-align: left;
+}
+.sidebar-sec-head .sidebar-label { margin: 0; flex: none; }
+.sidebar-sec-active {
+  min-width: 0;
+  padding: 0.0625rem 0.5rem;
+  border-radius: 62.4375rem;
+  background: var(--color-accent-dim);
+  color: var(--color-accent);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-sec-chevron { margin-left: auto; color: var(--color-text-dim); font-size: 0.75rem; }
+.sidebar-sec-head:hover .sidebar-label { color: var(--color-accent); }
+.sidebar-sec-body { padding-bottom: 0.25rem; }
+.sidebar-sec-body .search-input-wrap.sm { padding: 0.375rem 0.5rem; margin-bottom: 0.375rem; }
+.sidebar-sec-body .search-input-wrap.sm input { font-size: 0.8125rem; }
+
+/* 投稿画面の物件種別 */
+.type-choices { display: flex; flex-wrap: wrap; gap: 0.375rem; }
+.type-choice {
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 62.4375rem;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.8125rem;
+}
+.type-choice.on { background: var(--color-accent); border-color: var(--color-accent); color: #fff; font-weight: 700; }
+
+/* 案件詳細・タイムラインの物件種別・会場 */
+.post-meta-links { display: flex; flex-wrap: wrap; gap: 0.375rem 0.875rem; margin: 0.25rem 0 0.625rem; font-size: 0.8125rem; }
+.post-meta-item { display: inline-flex; align-items: baseline; gap: 0.375rem; }
+.post-meta-label { font-size: 0.6875rem; font-weight: 700; color: var(--color-text-dim); letter-spacing: 0.04em; }
+.post-meta-link { color: var(--color-accent); font-weight: 600; }
+.post-meta-link:hover { text-decoration: underline; }
+.post-meta-links.compact { margin: 0.375rem 0 0; font-size: 0.75rem; }

@@ -343,8 +343,11 @@ window.AppSSO = (function () {
     return {
       object: o.object || "Opportunity",
       propertyNoField: o.propertyNoField || "",
-      // 物件種別（ハッシュタグに自動入力する）。空なら使わない
+      // 物件種別（投稿の「物件種別」に自動入力する）。空なら使わない
       propertyTypeField: o.propertyTypeField === undefined ? "PropertyType__c" : o.propertyTypeField || "",
+      // 会場（会場マスタを参照する項目）。参照先の会場名を投稿の「会場」に自動入力する。空なら使わない
+      venueField: o.venueField || "",
+      venueNameField: o.venueNameField || "Name",
     };
   }
 
@@ -370,24 +373,39 @@ window.AppSSO = (function () {
     if (!/^[A-Za-z0-9_]+$/.test(oc.propertyNoField) || !/^[A-Za-z0-9_]+$/.test(oc.object)) {
       return Promise.reject(new Error("src/config.js の salesforceOpportunity の設定が正しくありません。"));
     }
-    var typeField = /^[A-Za-z0-9_]+$/.test(oc.propertyTypeField) && !propertyTypeUnavailable ? oc.propertyTypeField : "";
-    function run(withType) {
+    // 物件種別・会場は、項目が無い（参照できない）場合はそれ抜きで検索する
+    var ok = /^[A-Za-z0-9_]+$/;
+    var typeField = ok.test(oc.propertyTypeField) && !unavailable.type ? oc.propertyTypeField : "";
+    var venuePath =
+      /^[A-Za-z0-9_]+__c$/.test(oc.venueField) && ok.test(oc.venueNameField) && !unavailable.venue
+        ? oc.venueField.replace(/__c$/, "__r") + "." + oc.venueNameField
+        : "";
+    function run() {
       var q =
-        "SELECT Id, Name" + (withType ? ", " + typeField : "") + " FROM " + oc.object +
+        "SELECT Id, Name" + (typeField ? ", " + typeField : "") + (venuePath ? ", " + venuePath : "") +
+        " FROM " + oc.object +
         " WHERE " + oc.propertyNoField + " = " + soqlString(no) +
         " LIMIT 2";
       return api("GET", "/query?q=" + encodeURIComponent(q));
     }
-    return run(!!typeField)
-      .catch(function (e) {
-        // 物件種別の項目が無い・参照できない場合は、物件種別なしで検索する
-        if (typeField && e.code === "INVALID_FIELD" && e.message.indexOf(typeField) !== -1) {
-          propertyTypeUnavailable = true;
-          typeField = "";
-          return run(false);
+    function attempt() {
+      return run().catch(function (e) {
+        if (e.code === "INVALID_FIELD") {
+          if (typeField && e.message.indexOf(typeField) !== -1) {
+            unavailable.type = true;
+            typeField = "";
+            return attempt();
+          }
+          if (venuePath && e.message.indexOf(venuePath.split(".")[0]) !== -1) {
+            unavailable.venue = true;
+            venuePath = "";
+            return attempt();
+          }
         }
         throw e;
-      })
+      });
+    }
+    return attempt()
       .catch(function (e) {
         if (e.code === "INVALID_FIELD" || e.code === "INVALID_TYPE") {
           throw new Error("物件Noの項目名の設定が正しくありません。src/config.js の salesforceOpportunity.propertyNoField を確認してください。");
@@ -398,19 +416,54 @@ window.AppSSO = (function () {
         var recs = (body && body.records) || [];
         if (!recs.length) return null;
         var r = recs[0];
+        var venue = "";
+        if (venuePath) {
+          var parts = venuePath.split(".");
+          venue = (r[parts[0]] && r[parts[0]][parts[1]]) || "";
+        }
         return {
           id: r.Id,
           name: r.Name || "",
           url: recordUrl(oc.object, r.Id),
           multiple: recs.length > 1,
           propertyTypes: typeField ? cleanPropertyTypes(r[typeField]) : [],
+          venue: String(venue).trim(),
         };
       });
   }
 
+  // 物件種別の選択肢（商談の選択リストの値から「番号/」を除いたもの）。取得できなければ []
+  var propertyTypeOptionsPromise = null;
+  function loadPropertyTypeOptions() {
+    var oc = opportunityConfig();
+    if (!/^[A-Za-z0-9_]+$/.test(oc.propertyTypeField) || !/^[A-Za-z0-9_]+$/.test(oc.object)) return Promise.resolve([]);
+    if (!propertyTypeOptionsPromise) {
+      propertyTypeOptionsPromise = api("GET", "/sobjects/" + oc.object + "/describe").then(
+        function (d) {
+          var f = (d.fields || []).find(function (x) {
+            return x.name === oc.propertyTypeField;
+          });
+          var out = [];
+          ((f && f.picklistValues) || []).forEach(function (v) {
+            if (v.active === false) return;
+            cleanPropertyTypes(v.value).forEach(function (c) {
+              if (out.indexOf(c) === -1) out.push(c);
+            });
+          });
+          return out;
+        },
+        function () {
+          propertyTypeOptionsPromise = null;
+          return [];
+        }
+      );
+    }
+    return propertyTypeOptionsPromise;
+  }
+
   // 物件種別の値から、先頭（または末尾）の「番号と/」を除く。例: "01/展示会" → "展示会"
   // 複数選択の選択リスト（「;」区切り）にも対応する
-  var propertyTypeUnavailable = false;
+  var unavailable = { type: false, venue: false };
   function cleanPropertyTypes(value) {
     if (value === null || value === undefined) return [];
     return String(value)
@@ -432,6 +485,7 @@ window.AppSSO = (function () {
     recordUrl: recordUrl,
     searchOpportunityByPropertyNo: searchOpportunityByPropertyNo,
     cleanPropertyTypes: cleanPropertyTypes,
+    loadPropertyTypeOptions: loadPropertyTypeOptions,
     isConfigured: isConfigured,
     startLogin: startLogin,
     consumeRedirect: consumeRedirect,
