@@ -285,10 +285,15 @@ window.AppPages = (function () {
   // ====================================================================
   // Feed（一覧・検索）
   // ====================================================================
-  function filterProjects(projects, users, q, tag) {
+  // f: { q, tag, ptype（物件種別）, venue（会場） }
+  function filterProjects(projects, users, f) {
+    var q = f.q,
+      tag = f.tag;
     var qKey = AppUtils.tagKey(q || "");
     var tagFilterKey = tag ? AppUtils.tagKey(tag) : "";
     return projects.filter(function (p) {
+      if (f.ptype && (p.propertyTypes || []).indexOf(f.ptype) === -1) return false;
+      if (f.venue && p.venue !== f.venue) return false;
       if (tagFilterKey) {
         var hasTag = p.tags.some(function (t) {
           return AppUtils.tagKey(t) === tagFilterKey;
@@ -309,7 +314,12 @@ window.AppPages = (function () {
             });
           return !!u && String(u.displayName).toLowerCase().indexOf(qKey) !== -1;
         });
-        if (!titleMatch && !tagMatch && !staffMatch) return false;
+        var placeMatch =
+          String(p.venue || "").toLowerCase().indexOf(qKey) !== -1 ||
+          (p.propertyTypes || []).some(function (t) {
+            return t.toLowerCase().indexOf(qKey) !== -1;
+          });
+        if (!titleMatch && !tagMatch && !staffMatch && !placeMatch) return false;
       }
       return true;
     });
@@ -326,7 +336,13 @@ window.AppPages = (function () {
     var route = props.route;
     var q = route.query.q || "";
     var tag = route.query.tag || "";
-    var qsKey = "caseshelf_feed_scroll:" + q + "|" + tag;
+    var ptype = route.query.ptype || "";
+    var venueF = route.query.venue || "";
+    var qsKey = "caseshelf_feed_scroll:" + q + "|" + tag + "|" + ptype + "|" + venueF;
+    // 今の検索条件に patch を重ねたもの
+    function withQuery(patch) {
+      return Object.assign({ q: q, tag: tag, ptype: ptype, venue: venueF }, patch);
+    }
 
     var _input = useState(q);
     var inputVal = _input[0],
@@ -373,9 +389,9 @@ window.AppPages = (function () {
 
     var filtered = useMemo(
       function () {
-        return sortNewestFirst(filterProjects(store.projects, store.users, q, tag));
+        return sortNewestFirst(filterProjects(store.projects, store.users, { q: q, tag: tag, ptype: ptype, venue: venueF }));
       },
-      [store.projects, q, tag]
+      [store.projects, q, tag, ptype, venueF]
     );
 
     // 検索条件（qsKey）が変わるたび、その条件で保存していたスクロール位置を復元する。
@@ -426,11 +442,11 @@ window.AppPages = (function () {
       setInputVal(v);
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(function () {
-        applyQuery({ q: v, tag: tag });
+        applyQuery(withQuery({ q: v }));
       }, 300);
     }
 
-    var hasFilter = !!(q || tag);
+    var hasFilter = !!(q || tag || ptype || venueF);
 
     // PCでは、検索サイドバーを閉じたり開いたりできる（閉じた状態はこのブラウザに覚えておく）
     var SIDEBAR_PREF = "caseshelf_feed_sidebar_closed";
@@ -498,7 +514,7 @@ window.AppPages = (function () {
     function clearQ() {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       setInputVal("");
-      applyQuery({ q: "", tag: tag });
+      applyQuery(withQuery({ q: "" }));
     }
     function clearAll() {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -508,8 +524,51 @@ window.AppPages = (function () {
     function selectTag(t) {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       var same = tag && AppUtils.tagKey(tag) === AppUtils.tagKey(t);
-      applyQuery({ q: inputVal, tag: same ? "" : t });
+      applyQuery(withQuery({ q: inputVal, tag: same ? "" : t }));
     }
+    function selectPtype(t) {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      applyQuery(withQuery({ q: inputVal, ptype: ptype === t ? "" : t }));
+    }
+    function selectVenue(v) {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      applyQuery(withQuery({ q: inputVal, venue: venueF === v ? "" : v }));
+    }
+
+    // 物件種別・会場ごとの件数（多い順）
+    function countBy(getValues) {
+      var map = {};
+      var list = [];
+      store.projects.forEach(function (p) {
+        getValues(p).forEach(function (v) {
+          if (!v) return;
+          if (!map[v]) {
+            map[v] = { value: v, count: 0 };
+            list.push(map[v]);
+          }
+          map[v].count += 1;
+        });
+      });
+      return list.sort(function (a, b) {
+        return b.count - a.count || a.value.localeCompare(b.value, "ja");
+      });
+    }
+    var ptypeCounts = useMemo(
+      function () {
+        return countBy(function (p) {
+          return p.propertyTypes || [];
+        });
+      },
+      [store.projects]
+    );
+    var venueCounts = useMemo(
+      function () {
+        return countBy(function (p) {
+          return p.venue ? [p.venue] : [];
+        });
+      },
+      [store.projects]
+    );
 
     var sidebar = h(SearchSidebar, {
       inputVal: inputVal,
@@ -521,6 +580,14 @@ window.AppPages = (function () {
       hasFilter: hasFilter,
       tagCounts: tagCounts,
       onSelectTag: selectTag,
+      ptype: ptype,
+      ptypeCounts: ptypeCounts,
+      onSelectPtype: selectPtype,
+      showPtype: AppSF.propertyTypeFieldAvailable(),
+      venue: venueF,
+      venueCounts: venueCounts,
+      onSelectVenue: selectVenue,
+      showVenue: AppSF.venueFieldAvailable(),
       resultCount: filtered.length,
       onClose: function () {
         if (isDesktop()) setClosedPref(true);
@@ -552,6 +619,8 @@ window.AppPages = (function () {
             { className: "feed-mobile-conds" },
             q ? h("span", { className: "cond" }, "「" + q + "」") : null,
             tag ? h("span", { className: "cond" }, "#" + tag) : null,
+            ptype ? h("span", { className: "cond" }, "種別: " + ptype) : null,
+            venueF ? h("span", { className: "cond" }, "会場: " + venueF) : null,
             h(
               "button",
               { type: "button", className: "link-btn", onClick: clearAll },
@@ -608,19 +677,121 @@ window.AppPages = (function () {
 
   // 一覧の検索サイドバー（PCは左側に常に表示。スマートフォンは左から開くパネル）
   var SIDEBAR_TAGS = 15;
+  var SIDEBAR_VENUES = 10;
+  var SECTION_PREF = "caseshelf_sidebar_sections";
+
+  // 折りたたみできる見出し付きの区画（開閉の状態はこのブラウザに覚えておく）
+  function SidebarSection(props) {
+    var _open = useState(function () {
+      try {
+        var saved = JSON.parse(localStorage.getItem(SECTION_PREF) || "{}");
+        if (saved[props.id] !== undefined) return !!saved[props.id];
+      } catch (e) {}
+      return props.defaultOpen !== false;
+    });
+    var open = _open[0],
+      setOpen = _open[1];
+    function toggle() {
+      var next = !open;
+      setOpen(next);
+      try {
+        var saved = JSON.parse(localStorage.getItem(SECTION_PREF) || "{}");
+        saved[props.id] = next;
+        localStorage.setItem(SECTION_PREF, JSON.stringify(saved));
+      } catch (e) {}
+    }
+    var bodyId = "sidebar-sec-" + props.id;
+    return h(
+      "div",
+      { className: cx("sidebar-section", "collapsible", open && "open") },
+      h(
+        "button",
+        { type: "button", className: "sidebar-sec-head", onClick: toggle, "aria-expanded": open, "aria-controls": bodyId },
+        h("span", { className: "sidebar-label" }, props.title),
+        // 閉じていても、選択中の条件がわかるようにする
+        !open && props.active ? h("span", { className: "sidebar-sec-active" }, props.active) : null,
+        h("span", { className: "sidebar-sec-chevron", "aria-hidden": true }, open ? "▾" : "▸")
+      ),
+      open ? h("div", { className: "sidebar-sec-body", id: bodyId }, props.children) : null
+    );
+  }
+
+  // 件数付きの選択肢の一覧（物件種別・会場・ハッシュタグ）
+  function SidebarChoiceList(props) {
+    var selectedKey = props.selectedKey || "";
+    return h(
+      "ul",
+      { className: "sidebar-tags" },
+      h(
+        "li",
+        null,
+        h(
+          "button",
+          {
+            type: "button",
+            className: cx("sidebar-tag", !selectedKey && "active"),
+            onClick: function () {
+              if (selectedKey) props.onClear();
+            },
+          },
+          h("span", null, "すべて")
+        )
+      ),
+      props.items.map(function (t) {
+        var on = t.key === selectedKey;
+        return h(
+          "li",
+          { key: t.key },
+          h(
+            "button",
+            {
+              type: "button",
+              className: cx("sidebar-tag", on && "active"),
+              "aria-pressed": on,
+              onClick: function () {
+                props.onSelect(t);
+              },
+            },
+            h("span", { className: "sidebar-tag-name" }, t.label),
+            h("span", { className: "sidebar-tag-count" }, t.count)
+          )
+        );
+      })
+    );
+  }
+
   function SearchSidebar(props) {
     var _all = useState(false);
     var showAll = _all[0],
       setShowAll = _all[1];
+    var _vq = useState("");
+    var venueQ = _vq[0],
+      setVenueQ = _vq[1];
+
+    // ハッシュタグ
     var tagKey = props.tag ? AppUtils.tagKey(props.tag) : "";
-    var list = showAll ? props.tagCounts : props.tagCounts.slice(0, SIDEBAR_TAGS);
+    var tagList = showAll ? props.tagCounts : props.tagCounts.slice(0, SIDEBAR_TAGS);
     // 選択中のタグが表示範囲外なら先頭に出す
-    if (tagKey && !list.some(function (t) { return t.key === tagKey; })) {
+    if (tagKey && !tagList.some(function (t) { return t.key === tagKey; })) {
       var sel = props.tagCounts.find(function (t) {
         return t.key === tagKey;
       });
-      list = [sel || { tag: props.tag, key: tagKey, count: 0 }].concat(list);
+      tagList = [sel || { tag: props.tag, key: tagKey, count: 0 }].concat(tagList);
     }
+
+    // 会場：キーワードで絞り込み、多い順に最大10件表示
+    var vKey = venueQ.trim().toLowerCase();
+    var venueMatches = (props.venueCounts || []).filter(function (v) {
+      return !vKey || v.value.toLowerCase().indexOf(vKey) !== -1;
+    });
+    var venueShown = venueMatches.slice(0, SIDEBAR_VENUES);
+    if (props.venue && !venueShown.some(function (v) { return v.value === props.venue; })) {
+      var vsel = (props.venueCounts || []).find(function (v) {
+        return v.value === props.venue;
+      });
+      venueShown = [vsel || { value: props.venue, count: 0 }].concat(venueShown);
+    }
+
     return h(
       "div",
       { className: "sidebar-inner" },
@@ -647,7 +818,7 @@ window.AppPages = (function () {
             type: "search",
             value: props.inputVal,
             onChange: props.onInputChange,
-            placeholder: "案件名・タグ・デザイン担当者",
+            placeholder: "案件名・タグ・会場など",
             enterKeyHint: "search",
           }),
           props.inputVal
@@ -660,49 +831,95 @@ window.AppPages = (function () {
         ),
         h("div", { className: "sidebar-hint" }, "#は省略できます")
       ),
-      h(
-        "div",
-        { className: "sidebar-section" },
-        h("div", { className: "sidebar-label" }, "ハッシュタグ"),
-        props.tagCounts.length
-          ? h(
-              "ul",
-              { className: "sidebar-tags" },
-              h(
-                "li",
-                null,
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    className: cx("sidebar-tag", !tagKey && "active"),
-                    onClick: function () {
-                      if (tagKey) props.onSelectTag(props.tag);
-                    },
+      props.showPtype
+        ? h(
+            SidebarSection,
+            { id: "ptype", title: "物件種別", active: props.ptype },
+            props.ptypeCounts.length
+              ? h(SidebarChoiceList, {
+                  items: props.ptypeCounts.map(function (t) {
+                    return { key: t.value, label: t.value, count: t.count };
+                  }),
+                  selectedKey: props.ptype,
+                  onSelect: function (t) {
+                    props.onSelectPtype(t.key);
                   },
-                  h("span", null, "すべて")
-                )
-              ),
-              list.map(function (t) {
-                return h(
-                  "li",
-                  { key: t.key },
-                  h(
+                  onClear: function () {
+                    props.onSelectPtype(props.ptype);
+                  },
+                })
+              : h("div", { className: "sidebar-hint" }, "物件種別が入った投稿はまだありません")
+          )
+        : null,
+      props.showVenue
+        ? h(
+            SidebarSection,
+            { id: "venue", title: "会場", active: props.venue },
+            h(
+              "div",
+              { className: "search-input-wrap sm" },
+              h(SearchIcon, null),
+              h("input", {
+                type: "search",
+                value: venueQ,
+                "aria-label": "会場を検索",
+                onChange: function (e) {
+                  setVenueQ(e.target.value);
+                },
+                placeholder: "会場名で検索",
+              }),
+              venueQ
+                ? h(
                     "button",
                     {
                       type: "button",
-                      className: cx("sidebar-tag", t.key === tagKey && "active"),
-                      "aria-pressed": t.key === tagKey,
+                      className: "topbar-icon-btn",
                       onClick: function () {
-                        props.onSelectTag(t.tag);
+                        setVenueQ("");
                       },
+                      "aria-label": "会場の検索語をクリア",
                     },
-                    h("span", { className: "sidebar-tag-name" }, "#" + t.tag),
-                    h("span", { className: "sidebar-tag-count" }, t.count)
+                    "×"
                   )
-                );
-              })
-            )
+                : null
+            ),
+            props.venueCounts.length
+              ? venueShown.length
+                ? h(SidebarChoiceList, {
+                    items: venueShown.map(function (v) {
+                      return { key: v.value, label: v.value, count: v.count };
+                    }),
+                    selectedKey: props.venue,
+                    onSelect: function (t) {
+                      props.onSelectVenue(t.key);
+                    },
+                    onClear: function () {
+                      props.onSelectVenue(props.venue);
+                    },
+                  })
+                : h("div", { className: "sidebar-hint" }, "「" + venueQ + "」に一致する会場はありません")
+              : h("div", { className: "sidebar-hint" }, "会場が入った投稿はまだありません"),
+            venueMatches.length > SIDEBAR_VENUES
+              ? h("div", { className: "sidebar-hint" }, "ほか " + (venueMatches.length - SIDEBAR_VENUES) + " 件。会場名を入力して絞り込んでください")
+              : null
+          )
+        : null,
+      h(
+        SidebarSection,
+        { id: "tags", title: "ハッシュタグ", active: props.tag ? "#" + props.tag : "" },
+        props.tagCounts.length
+          ? h(SidebarChoiceList, {
+              items: tagList.map(function (t) {
+                return { key: t.key, label: "#" + t.tag, count: t.count, tag: t.tag };
+              }),
+              selectedKey: tagKey,
+              onSelect: function (t) {
+                props.onSelectTag(t.tag);
+              },
+              onClear: function () {
+                props.onSelectTag(props.tag);
+              },
+            })
           : h("div", { className: "sidebar-hint" }, "タグはまだありません"),
         props.tagCounts.length > SIDEBAR_TAGS
           ? h(
@@ -750,6 +967,35 @@ window.AppPages = (function () {
       "a",
       { className: cx(props.className, "user-link"), href: href, title: props.title || props.user.displayName + " さんのページを見る" },
       props.children
+    );
+  }
+
+  // 物件種別・会場の表示（案件詳細・タイムライン）。押すと、その条件で一覧を絞り込む
+  function PostMeta(props) {
+    var p = props.project;
+    var types = p.propertyTypes || [];
+    if (!types.length && !p.venue) return null;
+    return h(
+      "div",
+      { className: cx("post-meta-links", props.compact && "compact") },
+      types.length
+        ? h(
+            "span",
+            { className: "post-meta-item" },
+            h("span", { className: "post-meta-label" }, "物件種別"),
+            types.map(function (t) {
+              return h("a", { key: t, className: "post-meta-link", href: "#/feed" + AppUtils.buildQuery({ ptype: t }) }, t);
+            })
+          )
+        : null,
+      p.venue
+        ? h(
+            "span",
+            { className: "post-meta-item" },
+            h("span", { className: "post-meta-label" }, "会場"),
+            h("a", { className: "post-meta-link", href: "#/feed" + AppUtils.buildQuery({ venue: p.venue }) }, p.venue)
+          )
+        : null
     );
   }
 
@@ -885,6 +1131,7 @@ window.AppPages = (function () {
             : null
         ),
         h("a", { className: "tl-title", href: "#/project/" + project.id }, project.title),
+        h(PostMeta, { project: project, compact: true }),
         h(DesignStaffList, { staff: project.designStaff, store: store, compact: true }),
         desc
           ? h(
@@ -1111,6 +1358,7 @@ window.AppPages = (function () {
           project.propertyNo ? h("span", null, "·") : null,
           project.propertyNo ? h("span", null, "物件No " + project.propertyNo) : null
         ),
+        h(PostMeta, { project: project }),
         h(DesignStaffList, { staff: project.designStaff, store: store }),
         h(
           "div",
@@ -1262,6 +1510,40 @@ window.AppPages = (function () {
     var staff = _staff[0],
       setStaff = _staff[1];
     var staffEnabled = AppSF.designStaffAvailable() && departments.length > 0;
+
+    // 物件種別（カテゴリ）・会場
+    var typeEnabled = AppSF.propertyTypeFieldAvailable();
+    var venueEnabled = AppSF.venueFieldAvailable();
+    var _ptypes = useState(existing && existing.propertyTypes ? existing.propertyTypes.slice() : []);
+    var propertyTypes = _ptypes[0],
+      setPropertyTypes = _ptypes[1];
+    var _venue = useState(existing ? existing.venue || "" : "");
+    var venue = _venue[0],
+      setVenue = _venue[1];
+    // 物件種別の選択肢：Salesforceの選択リストの値＋投稿で使われている値
+    var _typeOpts = useState([]);
+    var typeOptions = _typeOpts[0],
+      setTypeOptions = _typeOpts[1];
+    useEffect(function () {
+      if (!typeEnabled) return;
+      var alive = true;
+      AppSSO.loadPropertyTypeOptions().then(function (list) {
+        if (alive) setTypeOptions(list);
+      });
+      return function () {
+        alive = false;
+      };
+    }, []);
+    var allTypeOptions = useMemo(
+      function () {
+        var out = typeOptions.slice();
+        store.allPropertyTypes.concat(propertyTypes).forEach(function (t) {
+          if (out.indexOf(t) === -1) out.push(t);
+        });
+        return out;
+      },
+      [typeOptions, store.allPropertyTypes, propertyTypes]
+    );
 
     // 投稿者（代理で投稿するときに、表示する人を選ぶ）。新規は自分、編集は今の投稿者
     // 代理投稿は、Salesforce上の所有者を変えるため管理者（CaseShelf管理者の権限セットを持つ人）だけが行える
@@ -1459,19 +1741,14 @@ window.AppPages = (function () {
           setErrors(function (prev) {
             return Object.assign({}, prev, { title: null });
           });
-          // 物件種別をハッシュタグに追加する（入力済みのタグは残す）
+          // 物件種別・会場を入力する（Salesforceに値が無いときは、入力済みの内容を残す）
           var types = opp.propertyTypes || [];
-          if (types.length) {
-            setTags(function (prev) {
-              return AppUtils.uniqueTags(prev.concat(types));
-            });
-            setErrors(function (prev) {
-              return Object.assign({}, prev, { tags: null });
-            });
-          }
+          if (types.length && typeEnabled) setPropertyTypes(types);
+          if (opp.venue && venueEnabled) setVenue(opp.venue);
           var baseMsg =
             "商談「" + opp.name + "」が見つかりました。案件名とSalesforce案件URLを入力しました。" +
-            (types.length ? " 物件種別「" + types.join("・") + "」をハッシュタグに追加しました。" : "") +
+            (types.length && typeEnabled ? " 物件種別「" + types.join("・") + "」を入力しました。" : "") +
+            (opp.venue && venueEnabled ? " 会場「" + opp.venue + "」を入力しました。" : "") +
             (opp.multiple ? "（同じ物件Noの商談が複数あったため、1件目を使いました）" : "");
           if (!staffEnabled) {
             setSfSearch({ state: "found", message: baseMsg });
@@ -1567,6 +1844,8 @@ window.AppPages = (function () {
         coverPhotoId: finalCoverId,
         salesforceUrl: sfdc.trim(),
         propertyNo: propNo.trim(),
+        propertyTypes: typeEnabled ? propertyTypes : undefined,
+        venue: venueEnabled ? venue.trim() : undefined,
         // 投稿者が実際に投稿した人と同じなら空（代理投稿ではない）
         authorEmail: authorEnabled
           ? String(authorEmail).toLowerCase() === String(creatorEmail).toLowerCase()
@@ -1674,11 +1953,77 @@ window.AppPages = (function () {
           : h(
               "div",
               { className: "hint" },
-              "物件Noを入力して検索すると、Salesforceの商談から案件名・Salesforce案件URL・物件種別（ハッシュタグ）" +
+              "物件Noを入力して検索すると、Salesforceの商談から案件名・Salesforce案件URL" +
+                (typeEnabled ? "・物件種別" : "") +
+                (venueEnabled ? "・会場" : "") +
                 (staffEnabled ? "・デザイン担当者" : "") +
                 "が自動で入力されます。"
             )
       ),
+
+      typeEnabled
+        ? h(
+            "div",
+            { className: "field" },
+            h("label", null, "物件種別（任意・物件Noの検索で自動入力）"),
+            allTypeOptions.length
+              ? h(
+                  "div",
+                  { className: "type-choices", role: "group", "aria-label": "物件種別" },
+                  allTypeOptions.map(function (t) {
+                    var on = propertyTypes.indexOf(t) !== -1;
+                    return h(
+                      "button",
+                      {
+                        key: t,
+                        type: "button",
+                        className: cx("type-choice", on && "on"),
+                        "aria-pressed": on,
+                        onClick: function () {
+                          setPropertyTypes(function (prev) {
+                            return on
+                              ? prev.filter(function (x) {
+                                  return x !== t;
+                                })
+                              : prev.concat([t]);
+                          });
+                        },
+                      },
+                      on ? "✓ " + t : t
+                    );
+                  })
+                )
+              : h("div", { className: "hint" }, "物件Noで検索すると自動で入力されます。"),
+            h("div", { className: "hint" }, "押すと選択・解除できます。一覧の検索・絞り込みで、物件種別から探せます。")
+          )
+        : null,
+
+      venueEnabled
+        ? h(
+            "div",
+            { className: "field" },
+            h("label", { htmlFor: "post-venue" }, "会場（任意・物件Noの検索で自動入力）"),
+            h("input", {
+              id: "post-venue",
+              className: "text-input",
+              value: venue,
+              maxLength: 255,
+              list: "venue-suggest",
+              onChange: function (e) {
+                setVenue(e.target.value);
+              },
+              placeholder: "例: 東京ビッグサイト",
+            }),
+            h(
+              "datalist",
+              { id: "venue-suggest" },
+              store.allVenues.map(function (v) {
+                return h("option", { key: v, value: v });
+              })
+            ),
+            h("div", { className: "hint" }, "一覧の検索・絞り込みで、会場から探せます。")
+          )
+        : null,
 
       staffEnabled
         ? h(
