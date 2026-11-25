@@ -298,7 +298,7 @@
       return loadAll(profileRef.current).then(
         function (res) {
           if (!res.ok) {
-            toast(res.error === "notRegistered" ? "CaseShelfの利用者登録が見つからないため、ログアウトしました。" : res.error, "error");
+            toast(res.error === "notRegistered" ? "RecordPOOLの利用者登録が見つからないため、ログアウトしました。" : res.error, "error");
             logout(res.error === "notRegistered" ? null : res.error);
           }
         },
@@ -313,7 +313,7 @@
       });
     }
 
-    // Salesforceでログインした人を、メールアドレスでCaseShelfの利用者と照合してデータを読み込む
+    // Salesforceでログインした人を、メールアドレスでRecordPOOLの利用者と照合してデータを読み込む
     function loginWithSalesforce(profile) {
       setLoginMessage(null);
       return loadAll(profile).then(function (res) {
@@ -339,7 +339,7 @@
 
     var isAdmin = !!(currentUser && currentUser.role === "admin" && currentUser.status === "active");
 
-    // 投稿に、CaseShelfの利用者（投稿者）を対応させる。サンプル投稿を後ろに付ける。
+    // 投稿に、RecordPOOLの利用者（投稿者）を対応させる。サンプル投稿を後ろに付ける。
     var projects = React.useMemo(
       function () {
         var byEmail = {};
@@ -366,7 +366,7 @@
       return u || { displayName: project.authorName || project.authorEmail || "不明な利用者", email: project.authorEmail || "" };
     }
 
-    // デザイン担当者に対応する CaseShelf の利用者（Salesforceのメールアドレスで結び付ける。
+    // デザイン担当者に対応する RecordPOOL の利用者（Salesforceのメールアドレスで結び付ける。
     // メールアドレスが無いときは、表示名が同じ人が1人だけならその人）。見つからなければ null
     function userForStaff(person) {
       if (!person) return null;
@@ -747,7 +747,7 @@
       var me = currentUser;
       if (patch.avatarDataUrl) {
         return wrap(
-          AppSF.uploadImage(patch.avatarDataUrl, me.id, "CaseShelfプロフィール画像").then(function (vid) {
+          AppSF.uploadImage(patch.avatarDataUrl, me.id, "RecordPOOLプロフィール画像").then(function (vid) {
             return AppSF.updateUser(me.id, { avatarVersionId: vid }).then(function () {
               patchUserLocal(me.id, { avatarVersionId: vid });
               if (me.avatarVersionId) AppSF.deleteFiles([me.avatarVersionId]);
@@ -974,7 +974,7 @@
     );
 
     if (store.phase === "loading") {
-      return h("div", { className: "center-loading" }, "Salesforceからデータを読み込み中...");
+      return h(C.Loader, { text: "Salesforceからデータを読み込み中..." });
     }
     if (store.phase === "error") {
       return h(
@@ -1008,21 +1008,21 @@
 
     if (!store.currentUser) {
       if (route.name !== "login") {
-        return h("div", { className: "center-loading" }, "読み込み中...");
+        return h(C.Loader, { text: "読み込み中..." });
       }
       return h(P.LoginPage, { store: store, route: Object.assign({}, route, router) });
     }
 
     if (store.currentUser.status === "suspended") {
-      return h("div", { className: "center-loading" }, "読み込み中...");
+      return h(C.Loader, { text: "読み込み中..." });
     }
 
     if (route.name === "login") {
-      return h("div", { className: "center-loading" }, "読み込み中...");
+      return h(C.Loader, { text: "読み込み中..." });
     }
 
     if (route.name === "admin" && !store.isAdmin) {
-      return h("div", { className: "center-loading" }, "読み込み中...");
+      return h(C.Loader, { text: "読み込み中..." });
     }
 
     var activeNavKey =

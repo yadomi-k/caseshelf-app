@@ -1,14 +1,14 @@
-// CaseShelfのデータをSalesforceに読み書きする
+// RecordPOOLのデータをSalesforceに読み書きする
 //
 // 保存先（Salesforceに作るカスタムオブジェクト。作り方は docs/salesforce-setup.md）
 //   CaseShelf_Post__c     投稿（案件名・説明・タグ・物件No・商談URL・写真の並び・デザイン担当者）
-//   CaseShelf_User__c     CaseShelfの利用者（表示名・メール・権限・状態・プロフィール画像）
+//   CaseShelf_User__c     RecordPOOLの利用者（表示名・メール・権限・状態・プロフィール画像）
 //   CaseShelf_Save__c     保存（ブックマーク）。所有者＝保存した人
 //   CaseShelf_Request__c  未登録の人からの利用登録の依頼
 //   CaseShelf_Reaction__c 投稿へのリアクション（絵文字）。作成者＝リアクションした人
 //   写真・プロフィール画像は Salesforce のファイル（ContentVersion）として、投稿・利用者のレコードにひも付けて保存する。
 //
-// 投稿者は、投稿レコードの「作成者」（Salesforceのユーザー）のメールアドレスで CaseShelf の利用者と対応させる。
+// 投稿者は、投稿レコードの「作成者」（Salesforceのユーザー）のメールアドレスで RecordPOOL の利用者と対応させる。
 window.AppSF = (function () {
   "use strict";
 
@@ -84,7 +84,7 @@ window.AppSF = (function () {
   }
 
   // デザイン担当者 [{ dept, name, email }]（1人1件）。
-  // email は Salesforce のユーザーのメールアドレスで、CaseShelf の利用者と結び付けるのに使う。
+  // email は Salesforce のユーザーのメールアドレスで、RecordPOOL の利用者と結び付けるのに使う。
   // 以前の形式（1件に「山田、鈴木」のように複数人）も1人ずつに分ける。
   function parseDesignStaff(text) {
     try {
@@ -393,7 +393,7 @@ window.AppSF = (function () {
   // 画像（data URL）をファイルとして保存し、指定したレコードにひも付ける。ContentVersion の Id を返す。
   function uploadImage(dataUrl, recordId, title) {
     return create("ContentVersion", {
-      Title: title || "CaseShelf写真",
+      Title: title || "RecordPOOL写真",
       PathOnClient: (title || "photo") + ".jpg",
       VersionData: dataUrlToBase64(dataUrl),
       FirstPublishLocationId: recordId,
@@ -445,7 +445,7 @@ window.AppSF = (function () {
       .reduce(function (chain, p, i) {
         return chain.then(function (acc) {
           if (!p.dataUrl) return acc.concat([{ id: p.id, size: p.size || 0 }]);
-          return uploadImage(p.dataUrl, recordId, "CaseShelf写真" + (i + 1)).then(function (vid) {
+          return uploadImage(p.dataUrl, recordId, "RecordPOOL写真" + (i + 1)).then(function (vid) {
             idMap[p.id] = vid;
             return acc.concat([{ id: vid, size: p.size || 0 }]);
           });
