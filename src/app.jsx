@@ -868,6 +868,73 @@
           })
         );
       },
+      // 利用者の表示名・メールアドレス・権限を変更する。patch: { displayName?, email?, role? }
+      updateUser: function (userId, patch) {
+        var target = users.find(function (u) {
+          return u.id === userId;
+        });
+        if (!target) return Promise.resolve({ ok: false, error: "利用者が見つかりません。" });
+        var p = {};
+        if (patch.displayName !== undefined) {
+          var name = String(patch.displayName).trim();
+          if (!name) return Promise.resolve({ ok: false, error: "表示名を入力してください。" });
+          if (name !== target.displayName) p.displayName = name;
+        }
+        if (patch.email !== undefined) {
+          var email = String(patch.email).trim();
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            return Promise.resolve({ ok: false, error: "メールアドレスの形式が正しくありません。" });
+          }
+          if (lower(email) !== lower(target.email)) {
+            var dup = users.some(function (u) {
+              return u.id !== userId && lower(u.email) === lower(email);
+            });
+            if (dup) return Promise.resolve({ ok: false, error: "そのメールアドレスは既に登録されています。" });
+            if (currentUser && userId === currentUser.id) {
+              return Promise.resolve({ ok: false, error: "自分自身のメールアドレスは変更できません（ログインできなくなるため）。" });
+            }
+            p.email = email;
+          }
+        }
+        if (patch.role !== undefined && patch.role !== target.role) {
+          if (currentUser && userId === currentUser.id && patch.role !== "admin") {
+            return Promise.resolve({ ok: false, error: "自分自身の管理者権限は外せません。ほかの管理者に依頼してください。" });
+          }
+          p.role = patch.role === "admin" ? "admin" : "member";
+        }
+        if (!Object.keys(p).length) return Promise.resolve({ ok: true, unchanged: true });
+        return AppSF.updateUser(userId, p).then(
+          function () {
+            patchUserLocal(userId, p);
+            return { ok: true };
+          },
+          function (e) {
+            return {
+              ok: false,
+              error: e.code === "DUPLICATE_VALUE" ? "そのメールアドレスは既に登録されています。" : e.message,
+            };
+          }
+        );
+      },
+      // 利用者を削除する（自分自身と、最後の管理者は削除できない）
+      deleteUser: function (userId) {
+        var target = users.find(function (u) {
+          return u.id === userId;
+        });
+        if (!target) return Promise.resolve({ ok: false, error: "利用者が見つかりません。" });
+        if (currentUser && userId === currentUser.id) {
+          return Promise.resolve({ ok: false, error: "自分自身は削除できません。" });
+        }
+        return wrap(
+          AppSF.deleteUser(userId, target.avatarVersionId).then(function () {
+            setUsers(function (prev) {
+              return prev.filter(function (u) {
+                return u.id !== userId;
+              });
+            });
+          })
+        );
+      },
       setUserStatus: function (userId, status) {
         return wrap(
           AppSF.updateUser(userId, { status: status }).then(function () {

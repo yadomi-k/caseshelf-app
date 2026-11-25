@@ -574,7 +574,17 @@ window.AppSF = (function () {
     if (patch.displayName !== undefined) f.Name = String(patch.displayName).slice(0, 80);
     if (patch.status !== undefined) f.Status__c = patch.status;
     if (patch.avatarVersionId !== undefined) f.AvatarVersionId__c = patch.avatarVersionId || "";
+    // メールアドレス・権限の変更は管理者のみ（権限セット「RecordPOOL管理者」の項目の編集権限が必要）
+    if (patch.email !== undefined) f.Email__c = String(patch.email).trim();
+    if (patch.role !== undefined) f.Role__c = patch.role === "admin" ? "admin" : "member";
     return update(OBJ.user, userId, f);
+  }
+
+  // 利用者を削除する（プロフィール画像のファイルも削除。投稿・保存・リアクションはそのまま残る）
+  function deleteUser(userId, avatarVersionId) {
+    return remove(OBJ.user, userId).then(function () {
+      if (avatarVersionId) return deleteFiles([avatarVersionId]);
+    });
   }
 
   // ------------------------------------------------------------------
@@ -641,6 +651,7 @@ window.AppSF = (function () {
     removeSave: removeSave,
     createUser: createUser,
     updateUser: updateUser,
+    deleteUser: deleteUser,
     createRequest: createRequest,
     setRequestStatus: setRequestStatus,
   };

@@ -657,6 +657,7 @@ body.no-scroll { overflow: hidden; }
   font-weight: 700;
 }
 .role-badge.suspended { background: #fde8e8; color: var(--color-danger); }
+.role-badge.member { background: #f0f0f0; color: var(--color-text-dim); }
 
 .login-note {
   font-size: 0.75rem;
@@ -1807,3 +1808,27 @@ a.design-staff-person.linked:hover { border-color: var(--color-accent); }
 @media (prefers-reduced-motion: reduce) {
   .loader-record { animation-duration: 6s; }
 }
+
+/* ---------- 管理者画面：利用者の編集 ---------- */
+
+.admin-user-tools { display: flex; align-items: center; gap: 0.75rem; margin: 0.875rem 0 0.5rem; }
+.admin-user-tools .search-input-wrap { flex: 1; max-width: 24rem; }
+.admin-user-count { font-size: 0.75rem; color: var(--color-text-dim); white-space: nowrap; }
+.admin-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.admin-actions { white-space: nowrap; }
+.admin-actions .btn + .btn { margin-left: 0.25rem; }
+.admin-dept { font-size: 0.6875rem; color: var(--color-text-dim); margin-top: 0.125rem; }
+.self-badge {
+  margin-left: 0.375rem;
+  padding: 0 0.375rem;
+  border-radius: 0.25rem;
+  background: var(--color-accent-dim);
+  color: var(--color-accent);
+  font-size: 0.625rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
+.btn.sm.danger { color: var(--color-danger); }
+.edit-user-card { width: min(28rem, calc(100vw - 2rem)); max-width: none; }
+.edit-user-card .field { margin-bottom: 0.875rem; }
+.edit-user-card .error { margin-bottom: 0.75rem; color: var(--color-danger); font-size: 0.8125rem; }
