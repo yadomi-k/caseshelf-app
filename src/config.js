@@ -44,8 +44,8 @@ window.AppConfig = {
     creativeDepartments: ["クリエイティブ部"],
   },
   // 最初の管理者のメールアドレス（Salesforceと同じもの）。
-  // この人は、CaseShelfの利用者がまだ登録されていなくても、初回ログイン時に自動で「管理者」として登録される。
-  // ※Salesforce側で「CaseShelf管理者」の権限セットが付与されている必要がある
+  // この人は、RecordPOOLの利用者がまだ登録されていなくても、初回ログイン時に自動で「管理者」として登録される。
+  // ※Salesforce側で「RecordPOOL管理者」の権限セットが付与されている必要がある
   initialAdminEmails: ["yadomi-k@shoei-bijutsu.co.jp"],
   // 公開実績ページをもとにしたサンプル投稿を一覧に表示するか（閲覧専用）。不要になったら false にする
   showSamplePosts: true,

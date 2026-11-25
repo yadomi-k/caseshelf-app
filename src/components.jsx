@@ -4,22 +4,28 @@ window.AppComponents = (function () {
   var h = React.createElement;
   var cx = AppUtils.classNames;
 
+  // RecordPOOL のロゴ（横長：マーク＋文字）
   function Logo(props) {
-    var size = props.size || 22;
+    return h("img", {
+      src: "./assets/logo-horizontal.png",
+      alt: "RecordPOOL",
+      className: cx("brand-logo", props.className),
+      style: props.height ? { height: props.height } : undefined,
+    });
+  }
+
+  // 読み込み中の表示：レコード部分だけが回り、「P」は止まったまま
+  function Loader(props) {
     return h(
-      "svg",
-      { width: size, height: size, viewBox: "0 0 24 24", fill: "none" },
-      h("rect", { x: 2, y: 2, width: 13, height: 13, rx: 3, fill: "#1d5fc4" }),
-      h("rect", {
-        x: 9,
-        y: 9,
-        width: 13,
-        height: 13,
-        rx: 3,
-        fill: "#9dc1f2",
-        stroke: "#fff",
-        strokeWidth: 1.5,
-      })
+      "div",
+      { className: cx("center-loading", "with-loader", props.className), role: "status", "aria-live": "polite" },
+      h(
+        "div",
+        { className: cx("loader-mark", props.small && "small"), "aria-hidden": true },
+        h("img", { className: "loader-record", src: "./assets/loader-record.png", alt: "" }),
+        h("img", { className: "loader-p", src: "./assets/loader-p.png", alt: "" })
+      ),
+      props.text ? h("div", { className: "loader-text" }, props.text) : null
     );
   }
 
@@ -386,7 +392,7 @@ window.AppComponents = (function () {
       "div",
       { className: "proto-banner" },
       props.children ||
-        "試作品: 投稿はSalesforceに保存され、CaseShelfの利用者全員が閲覧できます。"
+        "試作品: 投稿はSalesforceに保存され、RecordPOOLの利用者全員が閲覧できます。"
     );
   }
 
@@ -445,7 +451,7 @@ window.AppComponents = (function () {
 
   function TopBar(props) {
     // props: onBack, active, isAdmin, right(node)
-    // 画面名（案件詳細・タイムラインなど）は出さず、常にロゴと「CaseShelf」を表示する
+    // 画面名（案件詳細・タイムラインなど）は出さず、常にロゴと「RecordPOOL」を表示する
     return h(
       "header",
       { className: "topbar" },
@@ -469,9 +475,8 @@ window.AppComponents = (function () {
         : null,
       h(
         "a",
-        { className: "brand", href: "#/timeline" },
-        h(Logo, { size: 20 }),
-        "CaseShelf"
+        { className: "brand", href: "#/timeline", "aria-label": "RecordPOOL（タイムラインへ）" },
+        h(Logo, null)
       ),
       h("div", { className: "topbar-spacer" }),
       h(DesktopNav, { active: props.active, isAdmin: props.isAdmin, pendingCount: props.pendingCount }),
@@ -994,6 +999,7 @@ window.AppComponents = (function () {
 
   return {
     Logo: Logo,
+    Loader: Loader,
     Avatar: Avatar,
     Photo: Photo,
     ProtoBanner: ProtoBanner,

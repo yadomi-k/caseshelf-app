@@ -5,7 +5,7 @@
 //  2. ログイン後、Salesforceが ?code=... を付けてこのアプリに戻す
 //  3. code を使ってアクセストークンを取得し、ログインした人の情報（メールアドレス等）を取得
 //  4. アプリに登録済みの利用者のメールアドレスと一致すればログイン成功
-//  5. 取得したトークンで、CaseShelfのデータ（投稿・写真・利用者など）をSalesforceに読み書きする。
+//  5. 取得したトークンで、RecordPOOLのデータ（投稿・写真・利用者など）をSalesforceに読み書きする。
 //     トークンはログアウトするまでこのブラウザに保持し（localStorage）、ログアウト時に無効化する。
 //     有効期限（Salesforceのセッションタイムアウト）が切れたら、ログインし直す。
 //
@@ -253,8 +253,8 @@ window.AppSSO = (function () {
   function objectAccessMessage(objectName) {
     if (/^CaseShelf_/i.test(objectName)) {
       return (
-        "このSalesforceアカウントには、CaseShelfを使う権限（権限セット「CaseShelf利用者」）が付いていません。" +
-        "Salesforceの管理者に、権限セット「CaseShelf利用者」の割り当てを依頼してください。" +
+        "このSalesforceアカウントには、RecordPOOLを使う権限（権限セット「RecordPOOL利用者」）が付いていません。" +
+        "Salesforceの管理者に、権限セット「RecordPOOL利用者」の割り当てを依頼してください。" +
         "（割り当て後も表示される場合は、Salesforceのユーザーライセンスでカスタムオブジェクトが使えるか確認してください）"
       );
     }

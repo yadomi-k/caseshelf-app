@@ -31,16 +31,16 @@ window.AppPages = (function () {
     var stamp =
       now.getFullYear() + "/" + (now.getMonth() + 1) + "/" + now.getDate() + " " +
       now.getHours() + ":" + String(now.getMinutes()).padStart(2, "0");
-    var subject = "【CaseShelf】アカウント作成依頼";
+    var subject = "【RecordPOOL】アカウント作成依頼";
     var body = [
-      "CaseShelfのアカウント作成をお願いします。",
+      "RecordPOOLのアカウント作成をお願いします。",
       "",
-      "依頼内容: CaseShelfアカウント作成",
+      "依頼内容: RecordPOOLアカウント作成",
       "氏名: " + (profile.name || ""),
       "メールアドレス: " + profile.email,
       "依頼日時: " + stamp,
       "",
-      "※CaseShelfのログイン画面から送信された依頼です（Salesforceで本人確認済み）。",
+      "※RecordPOOLのログイン画面から送信された依頼です（Salesforceで本人確認済み）。",
     ].join("\n");
     return { to: to, href: "mailto:" + to + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body) };
   }
@@ -52,16 +52,16 @@ window.AppPages = (function () {
   }
   function registeredMailHref(user) {
     var loginUrl = appLoginUrl();
-    var subject = "【CaseShelf】CaseShelfアカウント登録完了";
+    var subject = "【RecordPOOL】RecordPOOLアカウント登録完了";
     var body = [
       (user.displayName || user.email) + " 様",
       "",
-      "CaseShelfアカウント登録完了",
+      "RecordPOOLアカウント登録完了",
       "",
-      "CaseShelfのアカウント登録が完了しました。",
+      "RecordPOOLのアカウント登録が完了しました。",
       "下記のURLを開き、「Salesforceでログイン」からログインしてください。",
       "",
-      "CaseShelfログインURL",
+      "RecordPOOLログインURL",
       loginUrl,
       "",
       "登録メールアドレス: " + user.email,
@@ -91,7 +91,7 @@ window.AppPages = (function () {
         h("a", { className: "btn primary sm", href: mail.href }, "登録完了メールを作成する"),
         h("button", { type: "button", className: "btn ghost sm", onClick: props.onClose }, "閉じる")
       ),
-      h("p", { className: "form-hint" }, "メールソフトが開き、件名「【CaseShelf】CaseShelfアカウント登録完了」とログインURL入りの本文が作成されます。内容を確認して送信してください。")
+      h("p", { className: "form-hint" }, "メールソフトが開き、件名「【RecordPOOL】RecordPOOLアカウント登録完了」とログインURL入りの本文が作成されます。内容を確認して送信してください。")
     );
   }
 
@@ -102,7 +102,7 @@ window.AppPages = (function () {
     return h(
       "div",
       { className: "login-card request-card" },
-      h("h2", null, done ? "利用登録を依頼しました" : "CaseShelfの利用登録がまだです"),
+      h("h2", null, done ? "利用登録を依頼しました" : "RecordPOOLの利用登録がまだです"),
       h(
         "div",
         { className: "request-who" },
@@ -116,7 +116,7 @@ window.AppPages = (function () {
           h(
             "p",
             { className: "request-text" },
-            "Salesforceでの本人確認はできました。CaseShelfを使うには、管理者による利用登録が必要です。"
+            "Salesforceでの本人確認はできました。RecordPOOLを使うには、管理者による利用登録が必要です。"
           ),
           props.error && h("div", { className: "login-error", role: "alert" }, props.error),
           h(
@@ -230,8 +230,7 @@ window.AppPages = (function () {
     var logo = h(
       "div",
       { className: "login-logo" },
-      h(C.Logo, { size: 40 }),
-      h("div", { className: "name" }, "CaseShelf"),
+      h("img", { className: "login-logo-img", src: "./assets/logo-vertical.png", alt: "RecordPOOL" }),
       h("div", { className: "tagline" }, "社内事例写真を、探しやすく。")
     );
 
@@ -277,7 +276,7 @@ window.AppPages = (function () {
       h(
         "p",
         { className: "login-note" },
-        "CaseShelfを使うには、管理者による利用者登録が必要です。投稿した内容は、CaseShelfの利用者全員が閲覧できます。"
+        "RecordPOOLを使うには、管理者による利用者登録が必要です。投稿した内容は、RecordPOOLの利用者全員が閲覧できます。"
       )
     );
   }
@@ -951,7 +950,7 @@ window.AppPages = (function () {
     );
   }
 
-  // 利用者のページへのリンク。CaseShelf に登録されている人だけリンクにし、未登録の人は名前の表示だけにする
+  // 利用者のページへのリンク。RecordPOOL に登録されている人だけリンクにし、未登録の人は名前の表示だけにする
   function userHref(store, user) {
     if (!user || !user.id) return null;
     var registered = store.users.some(function (u) {
@@ -1000,7 +999,7 @@ window.AppPages = (function () {
   }
 
   // デザイン担当者の表示（案件詳細・タイムライン）。
-  // CaseShelf の利用者と結び付いた人は、プロフィール画像と CaseShelf の表示名で表示する
+  // RecordPOOL の利用者と結び付いた人は、プロフィール画像と RecordPOOL の表示名で表示する
   function DesignStaffList(props) {
     var store = props.store;
     var list = props.staff || [];
@@ -1036,7 +1035,7 @@ window.AppPages = (function () {
                   store: store,
                   user: u,
                   className: cx("design-staff-person", u && "linked"),
-                  title: u ? u.displayName + " さんのページを見る" : p.name + "（CaseShelf未登録）",
+                  title: u ? u.displayName + " さんのページを見る" : p.name + "（RecordPOOL未登録）",
                 },
                 h(C.Avatar, { user: u || { displayName: p.name }, size: "sm" }),
                 h("span", { className: "design-staff-name" }, u ? u.displayName : p.name)
@@ -1499,7 +1498,7 @@ window.AppPages = (function () {
       });
       return m;
     });
-    // 担当者名 → Salesforceのメールアドレス（CaseShelfの利用者と結び付けるため、保存時に一緒に記録する）
+    // 担当者名 → Salesforceのメールアドレス（RecordPOOLの利用者と結び付けるため、保存時に一緒に記録する）
     var staffEmailRef = useRef(null);
     if (!staffEmailRef.current) {
       staffEmailRef.current = {};
@@ -1546,7 +1545,7 @@ window.AppPages = (function () {
     );
 
     // 投稿者（代理で投稿するときに、表示する人を選ぶ）。新規は自分、編集は今の投稿者
-    // 代理投稿は、Salesforce上の所有者を変えるため管理者（CaseShelf管理者の権限セットを持つ人）だけが行える
+    // 代理投稿は、Salesforce上の所有者を変えるため管理者（RecordPOOL管理者の権限セットを持つ人）だけが行える
     var authorEnabled = AppSF.authorFieldAvailable() && store.isAdmin;
     var creatorEmail = existing ? existing.creatorEmail : (store.currentUser && store.currentUser.email) || "";
     var _author = useState(existing ? existing.authorEmail : creatorEmail);
@@ -1859,7 +1858,7 @@ window.AppPages = (function () {
             AppSF.splitNames(staff[d]).map(function (name) {
               var email = staffEmailRef.current[name] || "";
               if (!email) {
-                // 手入力した名前が CaseShelf の利用者の表示名と一致すれば、その人として記録する
+                // 手入力した名前が RecordPOOL の利用者の表示名と一致すれば、その人として記録する
                 var u = store.userForStaff({ name: name });
                 if (u) email = u.email;
               }
