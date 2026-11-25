@@ -2700,6 +2700,130 @@ window.AppPages = (function () {
     );
   }
 
+  // 利用者の編集（管理者のみ）：表示名・メールアドレス・権限
+  function EditUserDialog(props) {
+    var store = props.store;
+    var u = props.user;
+    var isSelf = u.id === store.currentUser.id;
+    var _name = useState(u.displayName);
+    var name = _name[0],
+      setName = _name[1];
+    var _email = useState(u.email);
+    var email = _email[0],
+      setEmail = _email[1];
+    var _role = useState(u.role);
+    var role = _role[0],
+      setRole = _role[1];
+    var _saving = useState(false);
+    var saving = _saving[0],
+      setSaving = _saving[1];
+    var _err = useState("");
+    var err = _err[0],
+      setErr = _err[1];
+
+    function save(e) {
+      e.preventDefault();
+      if (saving) return;
+      setSaving(true);
+      setErr("");
+      store.admin.updateUser(u.id, { displayName: name, email: email, role: role }).then(function (res) {
+        setSaving(false);
+        if (!res.ok) {
+          setErr(res.error);
+          return;
+        }
+        if (!res.unchanged) {
+          store.toast(
+            "「" + name.trim() + "」さんの情報を更新しました。" +
+              (role === "admin" && u.role !== "admin"
+                ? "代理投稿などを行う場合は、Salesforceで権限セット「RecordPOOL管理者」も割り当ててください。"
+                : ""),
+            "success"
+          );
+        }
+        props.onClose();
+      });
+    }
+
+    return h(
+      "div",
+      {
+        className: "modal-overlay",
+        onClick: function (e) {
+          if (e.target === e.currentTarget && !saving) props.onClose();
+        },
+      },
+      h(
+        "form",
+        { className: "modal-card edit-user-card", onSubmit: save },
+        h("h3", null, "利用者の編集"),
+        h(
+          "div",
+          { className: "field" },
+          h("label", { htmlFor: "edit-user-name" }, "表示名"),
+          h("input", {
+            id: "edit-user-name",
+            className: "text-input",
+            value: name,
+            maxLength: 80,
+            onChange: function (e) {
+              setName(e.target.value);
+            },
+          })
+        ),
+        h(
+          "div",
+          { className: "field" },
+          h("label", { htmlFor: "edit-user-email" }, "メールアドレス（Salesforceと同じ）"),
+          h("input", {
+            id: "edit-user-email",
+            className: "text-input",
+            type: "email",
+            value: email,
+            disabled: isSelf,
+            onChange: function (e) {
+              setEmail(e.target.value);
+            },
+          }),
+          isSelf ? h("div", { className: "hint" }, "自分自身のメールアドレスは変更できません（ログインできなくなるため）。") : null
+        ),
+        h(
+          "div",
+          { className: "field" },
+          h("label", { htmlFor: "edit-user-role" }, "権限"),
+          h(
+            "select",
+            {
+              id: "edit-user-role",
+              className: "text-input",
+              value: role,
+              disabled: isSelf,
+              onChange: function (e) {
+                setRole(e.target.value);
+              },
+            },
+            h("option", { value: "member" }, "利用者"),
+            h("option", { value: "admin" }, "管理者")
+          ),
+          isSelf
+            ? h("div", { className: "hint" }, "自分自身の管理者権限は外せません。ほかの管理者に依頼してください。")
+            : h(
+                "div",
+                { className: "hint" },
+                "管理者にすると、管理者画面・すべての投稿の編集・削除・代理投稿ができます。Salesforceの権限セット「RecordPOOL管理者」の割り当ても必要です。"
+              )
+        ),
+        err ? h("div", { className: "error", role: "alert" }, err) : null,
+        h(
+          "div",
+          { className: "modal-actions" },
+          h("button", { type: "button", className: "btn ghost", onClick: props.onClose, disabled: saving }, "キャンセル"),
+          h("button", { type: "submit", className: "btn primary", disabled: saving }, saving ? "保存中..." : "保存する")
+        )
+      )
+    );
+  }
+
   function AdminPage(props) {
     var store = props.store;
     var _inviteEmail = useState("");
@@ -2714,6 +2838,15 @@ window.AppPages = (function () {
     var _confirmTarget = useState(null);
     var confirmTarget = _confirmTarget[0],
       setConfirmTarget = _confirmTarget[1];
+    var _userQ = useState(""); // 利用者一覧の絞り込み
+    var userQ = _userQ[0],
+      setUserQ = _userQ[1];
+    var _editing = useState(null); // 編集中の利用者
+    var editingUser = _editing[0],
+      setEditingUser = _editing[1];
+    var _deleting = useState(null); // 削除の確認中の利用者
+    var deletingUser = _deleting[0],
+      setDeletingUser = _deleting[1];
     var _registered = useState(null); // 直前に登録した利用者（登録完了メールの作成用）
     var registered = _registered[0],
       setRegistered = _registered[1];
@@ -2764,6 +2897,29 @@ window.AppPages = (function () {
         });
     }
 
+    // 利用者一覧（名前・メール・部で絞り込み。管理者→利用者、名前順）
+    var userKey = userQ.trim().toLowerCase().replace(/\s+/g, "");
+    var userRows = store.users
+      .filter(function (u) {
+        if (!userKey) return true;
+        return [u.displayName, u.email, store.departmentOf(u)].some(function (v) {
+          return String(v || "").toLowerCase().replace(/\s+/g, "").indexOf(userKey) !== -1;
+        });
+      })
+      .sort(function (a, b) {
+        if (a.role !== b.role) return a.role === "admin" ? -1 : 1;
+        return String(a.displayName).localeCompare(String(b.displayName), "ja");
+      });
+
+    function handleDeleteUser() {
+      var u = deletingUser;
+      setDeletingUser(null);
+      if (!u) return;
+      store.admin.deleteUser(u.id).then(function (res) {
+        store.toast(res.ok ? "「" + u.displayName + "」さんを削除しました。" : res.error, res.ok ? "success" : "error");
+      });
+    }
+
     function handleDeleteTag(tag) {
       setConfirmTarget(null);
       store.admin.deleteTagGlobally(tag).then(function (res) {
@@ -2790,7 +2946,7 @@ window.AppPages = (function () {
 
       h(RequestList, { store: store, onRegistered: setRegistered }),
 
-      h("h2", null, "利用者の登録・停止"),
+      h("h2", null, "利用者の登録・編集"),
       h(
         "form",
         { className: "inline-form", onSubmit: handleInvite },
@@ -2830,63 +2986,144 @@ window.AppPages = (function () {
         )
       ),
       h(
-        "table",
-        { className: "admin-table" },
+        "div",
+        { className: "admin-user-tools" },
         h(
-          "thead",
-          null,
-          h(
-            "tr",
-            null,
-            h("th", null, "利用者"),
-            h("th", null, "メール"),
-            h("th", null, "権限"),
-            h("th", null, "状態"),
-            h("th", null, "操作")
-          )
-        ),
-        h(
-          "tbody",
-          null,
-          store.users.map(function (u) {
-            var isSelf = u.id === store.currentUser.id;
-            return h(
-              "tr",
-              { key: u.id },
-              h("td", null, u.displayName),
-              h("td", null, u.email),
-              h("td", null, u.role === "admin" ? "管理者" : "利用者"),
-              h(
-                "td",
-                null,
-                h("span", { className: cx("status-pill", u.status) }, u.status === "active" ? "有効" : "停止中")
-              ),
-              h(
-                "td",
-                null,
-                h(
-                  "button",
-                  {
-                    className: "btn sm",
-                    disabled: isSelf,
-                    title: isSelf ? "自分自身は停止できません" : "",
-                    onClick: function () {
-                      var wasActive = u.status === "active";
-                      store.admin.setUserStatus(u.id, wasActive ? "suspended" : "active").then(function (res) {
-                        store.toast(
-                          !res.ok ? res.error : wasActive ? "利用を停止しました。" : "利用停止を解除しました。",
-                          res.ok ? "success" : "error"
-                        );
-                      });
-                    },
-                  },
-                  u.status === "active" ? "停止する" : "復帰させる"
-                )
-              )
-            );
+          "div",
+          { className: "search-input-wrap" },
+          h(SearchIcon, null),
+          h("input", {
+            type: "search",
+            value: userQ,
+            "aria-label": "利用者を検索",
+            placeholder: "名前・メールアドレス・部で検索",
+            onChange: function (e) {
+              setUserQ(e.target.value);
+            },
           })
+        ),
+        h("span", { className: "admin-user-count" }, userRows.length + " / " + store.users.length + " 名")
+      ),
+      h(
+        "div",
+        { className: "admin-table-wrap" },
+        h(
+          "table",
+          { className: "admin-table" },
+          h(
+            "thead",
+            null,
+            h(
+              "tr",
+              null,
+              h("th", null, "利用者"),
+              h("th", null, "メール"),
+              h("th", null, "権限"),
+              h("th", null, "状態"),
+              h("th", null, "操作")
+            )
+          ),
+          h(
+            "tbody",
+            null,
+            userRows.map(function (u) {
+              var isSelf = u.id === store.currentUser.id;
+              return h(
+                "tr",
+                { key: u.id },
+                h(
+                  "td",
+                  null,
+                  h(UserLink, { store: store, user: u }, u.displayName),
+                  isSelf ? h("span", { className: "self-badge" }, "自分") : null,
+                  store.departmentOf(u) ? h("div", { className: "admin-dept" }, store.departmentOf(u)) : null
+                ),
+                h("td", null, u.email),
+                h("td", null, h("span", { className: cx("role-badge", u.role) }, u.role === "admin" ? "管理者" : "利用者")),
+                h(
+                  "td",
+                  null,
+                  h("span", { className: cx("status-pill", u.status) }, u.status === "active" ? "有効" : "停止中")
+                ),
+                h(
+                  "td",
+                  { className: "admin-actions" },
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "btn sm",
+                      onClick: function () {
+                        setEditingUser(u);
+                      },
+                    },
+                    "編集"
+                  ),
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "btn sm",
+                      disabled: isSelf,
+                      title: isSelf ? "自分自身は停止できません" : "",
+                      onClick: function () {
+                        var wasActive = u.status === "active";
+                        store.admin.setUserStatus(u.id, wasActive ? "suspended" : "active").then(function (res) {
+                          store.toast(
+                            !res.ok ? res.error : wasActive ? "利用を停止しました。" : "利用停止を解除しました。",
+                            res.ok ? "success" : "error"
+                          );
+                        });
+                      },
+                    },
+                    u.status === "active" ? "停止" : "復帰"
+                  ),
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "btn sm danger",
+                      disabled: isSelf,
+                      title: isSelf ? "自分自身は削除できません" : "",
+                      onClick: function () {
+                        setDeletingUser(u);
+                      },
+                    },
+                    "削除"
+                  )
+                )
+              );
+            })
+          )
         )
       ),
+      userRows.length === 0 ? h("p", { className: "form-hint" }, "「" + userQ + "」に一致する利用者はいません。") : null,
+
+      editingUser
+        ? h(EditUserDialog, {
+            key: editingUser.id,
+            store: store,
+            user: editingUser,
+            onClose: function () {
+              setEditingUser(null);
+            },
+          })
+        : null,
+      h(C.ConfirmDialog, {
+        open: !!deletingUser,
+        title: "この利用者を削除しますか？",
+        message: deletingUser
+          ? "「" + deletingUser.displayName + "（" + deletingUser.email + "）」さんを削除します。" +
+            "この人はRecordPOOLにログインできなくなります（もう一度登録すれば使えます）。" +
+            "この人が投稿した案件・保存・リアクションは削除されません。一時的に使えなくしたいだけの場合は「停止」を使ってください。"
+          : "",
+        danger: true,
+        confirmLabel: "削除する",
+        onCancel: function () {
+          setDeletingUser(null);
+        },
+        onConfirm: handleDeleteUser,
+      }),
 
       h("h2", null, "投稿の管理"),
       h(
