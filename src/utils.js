@@ -52,6 +52,28 @@ window.AppUtils = (function () {
     }
   }
 
+  // 売上金額を金額帯にする（500万円未満は50万円単位、500万円以上は100万円単位で切り捨て）
+  // 例: 348万 → 300万、489万 → 450万、730万 → 700万。金額が無ければ null
+  function salesBand(amount) {
+    if (amount === null || amount === undefined || amount === "" || isNaN(Number(amount))) return null;
+    var a = Math.max(0, Number(amount));
+    return a < 5000000 ? Math.floor(a / 500000) * 500000 : Math.floor(a / 1000000) * 1000000;
+  }
+  // 金額帯の次の帯の手前（例: 300万 → 349万9999円。表示用）
+  function salesBandEnd(band) {
+    return band + (band < 5000000 ? 500000 : 1000000) - 1;
+  }
+  // 金額を「○万円」「○億○万円」と表示する
+  function formatManYen(yen) {
+    var man = Math.floor(yen / 10000);
+    if (man >= 10000) {
+      var oku = Math.floor(man / 10000),
+        rest = man % 10000;
+      return oku + "億" + (rest ? rest + "万" : "") + "円";
+    }
+    return man + "万円";
+  }
+
   function classNames() {
     var args = Array.prototype.slice.call(arguments);
     return args.filter(Boolean).join(" ");
@@ -161,6 +183,9 @@ window.AppUtils = (function () {
     tagKey: tagKey,
     uniqueTags: uniqueTags,
     formatDateTime: formatDateTime,
+    salesBand: salesBand,
+    salesBandEnd: salesBandEnd,
+    formatManYen: formatManYen,
     classNames: classNames,
     clamp: clamp,
     formatBytes: formatBytes,

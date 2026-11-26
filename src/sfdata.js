@@ -120,6 +120,7 @@ window.AppSF = (function () {
     AuthorEmail__c: true, // 投稿者（代理で投稿したときに表示する人のメールアドレス）
     PropertyType__c: true, // 物件種別（1行に1つ）
     Venue__c: true, // 会場名
+    SalesBand__c: true, // 売上金額の金額帯（円。画面には出さず、検索に使う）
   };
   var hasDesignStaffField = true; // optionalPostFields.DesignStaff__c と同じ（読み込み後に更新）
 
@@ -160,6 +161,7 @@ window.AppSF = (function () {
         })
         .filter(Boolean),
       venue: String(r.Venue__c || "").trim(),
+      salesBand: typeof r.SalesBand__c === "number" ? r.SalesBand__c : null,
     };
   }
 
@@ -179,6 +181,9 @@ window.AppSF = (function () {
     };
     if (optionalPostFields.PropertyType__c && payload.propertyTypes !== undefined) {
       f.PropertyType__c = (payload.propertyTypes || []).join("\n");
+    }
+    if (optionalPostFields.SalesBand__c && payload.salesBand !== undefined) {
+      f.SalesBand__c = payload.salesBand;
     }
     if (optionalPostFields.Venue__c && payload.venue !== undefined) {
       f.Venue__c = String(payload.venue || "").slice(0, 255);
@@ -626,6 +631,13 @@ window.AppSF = (function () {
     },
     venueFieldAvailable: function () {
       return optionalPostFields.Venue__c;
+    },
+    salesBandAvailable: function () {
+      return optionalPostFields.SalesBand__c;
+    },
+    // 投稿の金額帯だけを更新する（管理者の一括取得用）
+    updatePostSalesBand: function (postId, band) {
+      return update(OBJ.post, postId, { SalesBand__c: band });
     },
     designDepartments: function () {
       return designConfig().departments;

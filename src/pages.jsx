@@ -293,6 +293,12 @@ window.AppPages = (function () {
     return projects.filter(function (p) {
       if (f.ptype && (p.propertyTypes || []).indexOf(f.ptype) === -1) return false;
       if (f.venue && p.venue !== f.venue) return false;
+      // 売上金額（金額帯）の範囲。金額が入っていない投稿は対象外
+      if (f.amin !== "" && f.amin !== undefined || f.amax !== "" && f.amax !== undefined) {
+        if (typeof p.salesBand !== "number") return false;
+        if (f.amin !== "" && f.amin !== undefined && p.salesBand < Number(f.amin)) return false;
+        if (f.amax !== "" && f.amax !== undefined && p.salesBand > Number(f.amax)) return false;
+      }
       if (tagFilterKey) {
         var hasTag = p.tags.some(function (t) {
           return AppUtils.tagKey(t) === tagFilterKey;
@@ -337,10 +343,12 @@ window.AppPages = (function () {
     var tag = route.query.tag || "";
     var ptype = route.query.ptype || "";
     var venueF = route.query.venue || "";
-    var qsKey = "caseshelf_feed_scroll:" + q + "|" + tag + "|" + ptype + "|" + venueF;
+    var amin = route.query.amin || "";
+    var amax = route.query.amax || "";
+    var qsKey = "caseshelf_feed_scroll:" + q + "|" + tag + "|" + ptype + "|" + venueF + "|" + amin + "|" + amax;
     // 今の検索条件に patch を重ねたもの
     function withQuery(patch) {
-      return Object.assign({ q: q, tag: tag, ptype: ptype, venue: venueF }, patch);
+      return Object.assign({ q: q, tag: tag, ptype: ptype, venue: venueF, amin: amin, amax: amax }, patch);
     }
 
     var _input = useState(q);
@@ -388,9 +396,11 @@ window.AppPages = (function () {
 
     var filtered = useMemo(
       function () {
-        return sortNewestFirst(filterProjects(store.projects, store.users, { q: q, tag: tag, ptype: ptype, venue: venueF }));
+        return sortNewestFirst(
+          filterProjects(store.projects, store.users, { q: q, tag: tag, ptype: ptype, venue: venueF, amin: amin, amax: amax })
+        );
       },
-      [store.projects, q, tag, ptype, venueF]
+      [store.projects, q, tag, ptype, venueF, amin, amax]
     );
 
     // 検索条件（qsKey）が変わるたび、その条件で保存していたスクロール位置を復元する。
@@ -445,7 +455,7 @@ window.AppPages = (function () {
       }, 300);
     }
 
-    var hasFilter = !!(q || tag || ptype || venueF);
+    var hasFilter = !!(q || tag || ptype || venueF || amin || amax);
 
     // PCでは、検索サイドバーを閉じたり開いたりできる（閉じた状態はこのブラウザに覚えておく）
     var SIDEBAR_PREF = "caseshelf_feed_sidebar_closed";
@@ -529,6 +539,27 @@ window.AppPages = (function () {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       applyQuery(withQuery({ q: inputVal, ptype: ptype === t ? "" : t }));
     }
+    function setAmountRange(min, max, changed) {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      // 下限が上限より大きくなったら、もう一方の条件を外す
+      if (min !== "" && max !== "" && Number(min) > Number(max)) {
+        if (changed === "min") max = "";
+        else min = "";
+      }
+      applyQuery(withQuery({ q: inputVal, amin: min, amax: max }));
+    }
+    var salesBands = useMemo(
+      function () {
+        return store.projects
+          .map(function (p) {
+            return p.salesBand;
+          })
+          .filter(function (b) {
+            return typeof b === "number";
+          });
+      },
+      [store.projects]
+    );
     function selectVenue(v) {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       applyQuery(withQuery({ q: inputVal, venue: venueF === v ? "" : v }));
@@ -587,6 +618,11 @@ window.AppPages = (function () {
       venueCounts: venueCounts,
       onSelectVenue: selectVenue,
       showVenue: AppSF.venueFieldAvailable(),
+      showAmount: AppSF.salesBandAvailable(),
+      amin: amin,
+      amax: amax,
+      salesBands: salesBands,
+      onAmountRange: setAmountRange,
       resultCount: filtered.length,
       onClose: function () {
         if (isDesktop()) setClosedPref(true);
@@ -620,6 +656,7 @@ window.AppPages = (function () {
             tag ? h("span", { className: "cond" }, "#" + tag) : null,
             ptype ? h("span", { className: "cond" }, "種別: " + ptype) : null,
             venueF ? h("span", { className: "cond" }, "会場: " + venueF) : null,
+            amin || amax ? h("span", { className: "cond" }, "売上: " + amountRangeLabel(amin, amax)) : null,
             h(
               "button",
               { type: "button", className: "link-btn", onClick: clearAll },
@@ -759,6 +796,87 @@ window.AppPages = (function () {
     );
   }
 
+  // 売上金額の選択肢（金額帯）：0〜450万は50万円ごと、500万円以上は100万円ごと（投稿の最大の帯か3000万円まで）
+  function amountOptions(bands) {
+    var max = Math.max.apply(null, [30000000].concat(bands || []));
+    var out = [];
+    for (var v = 0; v < 5000000; v += 500000) out.push(v);
+    for (var w = 5000000; w <= max; w += 1000000) out.push(w);
+    return out;
+  }
+  function amountRangeLabel(min, max) {
+    var a = min !== "" ? AppUtils.formatManYen(Number(min)) : "";
+    var b = max !== "" ? AppUtils.formatManYen(AppUtils.salesBandEnd(Number(max))) : "";
+    return a + "〜" + b;
+  }
+
+  // 売上金額の範囲（いくら〜いくら）
+  function AmountRange(props) {
+    var opts = amountOptions(props.salesBands);
+    var count = (props.salesBands || []).filter(function (b) {
+      return (props.amin === "" || b >= Number(props.amin)) && (props.amax === "" || b <= Number(props.amax));
+    }).length;
+    return h(
+      "div",
+      { className: "amount-range" },
+      h(
+        "div",
+        { className: "amount-selects" },
+        h(
+          "select",
+          {
+            className: "text-input",
+            "aria-label": "売上金額の下限",
+            value: props.amin,
+            onChange: function (e) {
+              props.onChange(e.target.value, props.amax, "min");
+            },
+          },
+          h("option", { value: "" }, "下限なし"),
+          opts.map(function (v) {
+            return h("option", { key: v, value: String(v) }, AppUtils.formatManYen(v) + "〜");
+          })
+        ),
+        h("span", { className: "amount-tilde" }, "〜"),
+        h(
+          "select",
+          {
+            className: "text-input",
+            "aria-label": "売上金額の上限",
+            value: props.amax,
+            onChange: function (e) {
+              props.onChange(props.amin, e.target.value, "max");
+            },
+          },
+          h("option", { value: "" }, "上限なし"),
+          opts.map(function (v) {
+            return h("option", { key: v, value: String(v) }, "〜" + AppUtils.formatManYen(AppUtils.salesBandEnd(v)));
+          })
+        )
+      ),
+      h(
+        "div",
+        { className: "sidebar-hint" },
+        props.salesBands.length
+          ? "該当 " + count + " 件（売上金額が入っている投稿 " + props.salesBands.length + " 件のうち）"
+          : "売上金額が入った投稿はまだありません"
+      ),
+      props.amin || props.amax
+        ? h(
+            "button",
+            {
+              type: "button",
+              className: "link-btn",
+              onClick: function () {
+                props.onChange("", "");
+              },
+            },
+            "売上金額の条件を解除"
+          )
+        : null
+    );
+  }
+
   function SearchSidebar(props) {
     var _all = useState(false);
     var showAll = _all[0],
@@ -848,6 +966,13 @@ window.AppPages = (function () {
                   },
                 })
               : h("div", { className: "sidebar-hint" }, "物件種別が入った投稿はまだありません")
+          )
+        : null,
+      props.showAmount
+        ? h(
+            SidebarSection,
+            { id: "amount", title: "売上金額", active: props.amin || props.amax ? amountRangeLabel(props.amin, props.amax) : "" },
+            h(AmountRange, { amin: props.amin, amax: props.amax, salesBands: props.salesBands, onChange: props.onAmountRange })
           )
         : null,
       props.showVenue
@@ -1489,6 +1614,8 @@ window.AppPages = (function () {
     var sfSearch = _sfSearch[0],
       setSfSearch = _sfSearch[1];
     var searchSeqRef = useRef(0);
+    // 物件Noで検索したときの売上金額の金額帯 { no, band }
+    var salesRef = useRef(null);
     // デザイン担当者 { 部門名: 担当者名 }
     var departments = AppSF.designDepartments();
     var _staff = useState(function () {
@@ -1740,6 +1867,7 @@ window.AppPages = (function () {
           setErrors(function (prev) {
             return Object.assign({}, prev, { title: null });
           });
+          salesRef.current = { no: no, band: AppUtils.salesBand(opp.amount) };
           // 物件種別・会場を入力する（Salesforceに値が無いときは、入力済みの内容を残す）
           var types = opp.propertyTypes || [];
           if (types.length && typeEnabled) setPropertyTypes(types);
@@ -1869,6 +1997,32 @@ window.AppPages = (function () {
       };
 
       setSaving(true);
+      resolveSalesBand().then(function (band) {
+        if (band !== undefined) payload.salesBand = band;
+        submitPayload(payload);
+      });
+    }
+
+    // 売上金額の金額帯（画面には出さず、検索に使う）。
+    // 物件Noで検索済みならその結果、そうでなければ保存時にSalesforceから読み取る。
+    // 取れなかったときは undefined（今の値をそのまま残す）
+    function resolveSalesBand() {
+      if (!AppSF.salesBandAvailable()) return Promise.resolve(undefined);
+      var no = propNo.trim();
+      if (!no) return Promise.resolve(null);
+      if (salesRef.current && salesRef.current.no === no) return Promise.resolve(salesRef.current.band);
+      return AppSSO.searchOpportunityByPropertyNo(no).then(
+        function (opp) {
+          return opp ? AppUtils.salesBand(opp.amount) : undefined;
+        },
+        function () {
+          return undefined;
+        }
+      );
+    }
+
+    function submitPayload(payload) {
+      var finalPhotos = payload.photos;
       if (isEdit) {
         var keptIds = finalPhotos.map(function (p) {
           return p.id;
@@ -1907,6 +2061,21 @@ window.AppPages = (function () {
       { className: "form-page", onSubmit: handleSubmit },
       h("h1", { style: { fontSize: "1.125rem", margin: "0.375rem 0 1.125rem" } }, isEdit ? "案件を編集" : "案件を新規投稿"),
 
+      // ① Salesforceから自動入力（物件Noで検索 → 案件名・物件種別・会場・デザイン担当者・URL）
+      h(
+        "section",
+        { className: "form-step" },
+        h(
+          "div",
+          { className: "form-step-head" },
+          h("span", { className: "form-step-no" }, "1"),
+          h(
+            "div",
+            null,
+            h("h2", { className: "form-step-title" }, "物件Noを入れてSalesforceから取り込む"),
+            h("p", { className: "form-step-desc" }, "検索すると、下の「自動入力」の項目が埋まります。違っていれば直せます。")
+          )
+        ),
       h(
         "div",
         { className: "field" },
@@ -1960,11 +2129,29 @@ window.AppPages = (function () {
             )
       ),
 
+        h(
+          "div",
+          { className: cx("auto-fields", sfSearch.state === "found" && "filled") },
+      h(
+        "div",
+        { className: "field" },
+        h("label", null, "案件名 ", h("span", { className: "req" }, "必須"), " ", h("span", { className: "auto-badge" }, "自動入力")),
+        h("input", {
+          className: "text-input",
+          value: title,
+          onChange: function (e) {
+            setTitle(e.target.value);
+          },
+          placeholder: "例: ○○株式会社 展示会ブース装飾",
+        }),
+        errors.title ? h("div", { className: "error" }, errors.title) : null
+      ),
+
       typeEnabled
         ? h(
             "div",
             { className: "field" },
-            h("label", null, "物件種別（任意・物件Noの検索で自動入力）"),
+            h("label", null, "物件種別 ", h("span", { className: "auto-badge" }, "自動入力")),
             allTypeOptions.length
               ? h(
                   "div",
@@ -2001,7 +2188,7 @@ window.AppPages = (function () {
         ? h(
             "div",
             { className: "field" },
-            h("label", { htmlFor: "post-venue" }, "会場（任意・物件Noの検索で自動入力）"),
+            h("label", { htmlFor: "post-venue" }, "会場 ", h("span", { className: "auto-badge" }, "自動入力")),
             h("input", {
               id: "post-venue",
               className: "text-input",
@@ -2028,7 +2215,7 @@ window.AppPages = (function () {
         ? h(
             "div",
             { className: "field" },
-            h("label", null, "デザイン担当者（任意・物件Noの検索で自動入力）"),
+            h("label", null, "デザイン担当者 ", h("span", { className: "auto-badge" }, "自動入力")),
             h(
               "div",
               { className: "staff-inputs" },
@@ -2060,48 +2247,43 @@ window.AppPages = (function () {
           )
         : null,
 
-      authorEnabled
-        ? h(
-            "div",
-            { className: "field" },
-            h("label", { htmlFor: "post-author" }, "投稿者"),
-            h(C.UserPicker, {
-              id: "post-author",
-              users: authorChoices,
-              value: authorEmail,
-              onChange: setAuthorEmail,
-              suffixFor: function (u) {
-                return String(u.email).toLowerCase() === String(creatorEmail).toLowerCase() ? (isEdit ? "（実際に投稿した人）" : "（自分）") : "";
-              },
-            }),
-            h(
-              "div",
-              { className: "hint" },
-              "案件の担当者に代わって投稿するときは、担当者を選んでください。選んだ人がこの投稿の所有者になり、" +
-                "投稿者として表示され（マイページにも表示）、編集・削除できるようになります。"
-            )
-          )
-        : null,
-
       h(
         "div",
         { className: "field" },
-        h("label", null, "案件名 ※必須"),
+        h("label", null, "Salesforce案件URL ", h("span", { className: "auto-badge" }, "自動入力")),
         h("input", {
           className: "text-input",
-          value: title,
+          value: sfdc,
           onChange: function (e) {
-            setTitle(e.target.value);
+            setSfdc(e.target.value);
           },
-          placeholder: "例: ○○株式会社 展示会ブース装飾",
+          placeholder: "https://...",
         }),
-        errors.title ? h("div", { className: "error" }, errors.title) : null
+        h("div", { className: "hint" }, "入力すると案件詳細に「Salesforceで案件を見る」ボタンが表示されます。")
       ),
 
+        )
+      ),
+
+      // ② 投稿する人が入力する項目
+      h(
+        "section",
+        { className: "form-step" },
+        h(
+          "div",
+          { className: "form-step-head" },
+          h("span", { className: "form-step-no" }, "2"),
+          h(
+            "div",
+            null,
+            h("h2", { className: "form-step-title" }, "写真とハッシュタグを入力する"),
+            h("p", { className: "form-step-desc" }, "ここはSalesforceから入らないので、投稿する人が入力してください。")
+          )
+        ),
       h(
         "div",
         { className: "field" },
-        h("label", null, "写真 ※必須・複数枚対応"),
+        h("label", null, "写真 ", h("span", { className: "req" }, "必須"), h("span", { className: "label-note" }, "複数枚OK")),
         h(
           "div",
           {
@@ -2241,7 +2423,7 @@ window.AppPages = (function () {
       h(
         "div",
         { className: "field" },
-        h("label", null, "ハッシュタグ ※必須・複数設定可"),
+        h("label", null, "ハッシュタグ ", h("span", { className: "req" }, "必須"), h("span", { className: "label-note" }, "複数設定OK")),
         h(C.TagAutocomplete, {
           value: tags,
           onChange: setTags,
@@ -2254,7 +2436,7 @@ window.AppPages = (function () {
       h(
         "div",
         { className: "field" },
-        h("label", null, "案件説明（任意）"),
+        h("label", null, "案件説明 ", h("span", { className: "opt" }, "任意")),
         h("textarea", {
           className: "textarea",
           value: desc,
@@ -2265,20 +2447,49 @@ window.AppPages = (function () {
         })
       ),
 
-      h(
-        "div",
-        { className: "field" },
-        h("label", null, "Salesforce案件URL（任意・物件Noの検索で自動入力）"),
-        h("input", {
-          className: "text-input",
-          value: sfdc,
-          onChange: function (e) {
-            setSfdc(e.target.value);
-          },
-          placeholder: "https://...",
-        }),
-        h("div", { className: "hint" }, "入力すると案件詳細に「Salesforceで案件を見る」ボタンが表示されます。")
       ),
+
+      // ③ 投稿者（管理者が代理で投稿するときだけ）
+      authorEnabled
+        ? h(
+            "section",
+            { className: "form-step" },
+            h(
+              "div",
+              { className: "form-step-head" },
+              h("span", { className: "form-step-no" }, "3"),
+              h(
+                "div",
+                null,
+                h("h2", { className: "form-step-title" }, "投稿者（代理で投稿するときだけ変更）"),
+                h("p", { className: "form-step-desc" }, "ふだんは変更不要です。")
+              )
+            ),
+      authorEnabled
+        ? h(
+            "div",
+            { className: "field" },
+            h("label", { htmlFor: "post-author" }, "投稿者"),
+            h(C.UserPicker, {
+              id: "post-author",
+              users: authorChoices,
+              value: authorEmail,
+              onChange: setAuthorEmail,
+              suffixFor: function (u) {
+                return String(u.email).toLowerCase() === String(creatorEmail).toLowerCase() ? (isEdit ? "（実際に投稿した人）" : "（自分）") : "";
+              },
+            }),
+            h(
+              "div",
+              { className: "hint" },
+              "案件の担当者に代わって投稿するときは、担当者を選んでください。選んだ人がこの投稿の所有者になり、" +
+                "投稿者として表示され（マイページにも表示）、編集・削除できるようになります。"
+            )
+          )
+        : null,
+
+          )
+        : null,
 
       h(
         "div",
@@ -2697,6 +2908,56 @@ window.AppPages = (function () {
               )
             )
           )
+    );
+  }
+
+  // 売上金額の一括取得（管理者のみ）
+  function SalesBandRefresh(props) {
+    var store = props.store;
+    var _st = useState(null); // { done, total } 実行中 / { result } 完了
+    var st = _st[0],
+      setSt = _st[1];
+    var running = st && !st.result;
+    var count = store.projects.filter(function (p) {
+      return !p.isSample && p.propertyNo;
+    }).length;
+    function run() {
+      if (running) return;
+      setSt({ done: 0, total: count });
+      store.admin
+        .refreshSalesBands(function (done, total) {
+          setSt({ done: done, total: total });
+        })
+        .then(function (res) {
+          setSt({ result: res });
+          store.toast(res.ok ? "売上金額を取得しました。" : res.error, res.ok ? "success" : "error");
+        });
+    }
+    var r = st && st.result;
+    return h(
+      "div",
+      { className: "admin-box" },
+      h("h2", null, "売上金額の取得"),
+      h(
+        "p",
+        { className: "form-hint" },
+        "売上金額は、投稿の保存時に物件Noから自動で取得します（画面には表示せず、一覧の検索に使います）。" +
+          "以前の投稿や、Salesforceで金額が変わった場合は、ここからまとめて取得し直せます（物件Noがある投稿 " + count + " 件）。"
+      ),
+      h(
+        "button",
+        { type: "button", className: "btn", onClick: run, disabled: running || !count },
+        running ? "取得中... " + st.done + " / " + st.total : "売上金額をまとめて取得する"
+      ),
+      r && r.ok
+        ? h(
+            "p",
+            { className: "form-hint" },
+            "完了：更新 " + r.updated + " 件・変更なし " + r.unchanged + " 件" +
+              (r.notFound ? "・商談が見つからない " + r.notFound + " 件" : "") +
+              (r.failed ? "・失敗 " + r.failed + " 件" : "")
+          )
+        : null
     );
   }
 
@@ -3124,6 +3385,8 @@ window.AppPages = (function () {
         },
         onConfirm: handleDeleteUser,
       }),
+
+      AppSF.salesBandAvailable() ? h(SalesBandRefresh, { store: store }) : null,
 
       h("h2", null, "投稿の管理"),
       h(
