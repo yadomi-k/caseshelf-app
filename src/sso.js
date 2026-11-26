@@ -349,7 +349,7 @@ window.AppSSO = (function () {
       venueField: o.venueField || "",
       venueNameField: o.venueNameField || "Name",
       // 売上金額（金額帯にして投稿に保存し、金額で検索できるようにする）。空なら使わない
-      amountField: o.amountField === undefined ? "Amount" : o.amountField || "",
+      amountField: o.amountField === undefined ? "OrderEstimate__c" : o.amountField || "",
     };
   }
 
