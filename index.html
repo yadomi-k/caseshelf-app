@@ -6,7 +6,7 @@
 <title>RecordPOOL（試作品）</title>
 <link rel="icon" type="image/png" href="./assets/favicon.png" />
 <link rel="apple-touch-icon" href="./assets/icon-180.png" />
-<link rel="stylesheet" href="./styles.css" />
+<link rel="stylesheet" href="./styles.css?v=2026.11.26c" />
 </head>
 <body>
 <div id="root"></div>
@@ -16,14 +16,17 @@
 <script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.26.4/babel.min.js"></script>
 
-<!-- アプリ本体（素のJS → JSXの順で読み込み） -->
-<script src="./src/config.js"></script>
-<script src="./src/sso.js"></script>
-<script src="./src/sfdata.js"></script>
-<script src="./src/data.js"></script>
-<script src="./src/utils.js"></script>
-<script type="text/babel" data-presets="react" src="./src/components.jsx"></script>
-<script type="text/babel" data-presets="react" src="./src/pages.jsx"></script>
-<script type="text/babel" data-presets="react" src="./src/app.jsx"></script>
+<!-- アプリ本体（素のJS → JSXの順で読み込み）
+     ?v= はアプリのバージョン。更新のたびに変えることで、ブラウザが古いファイルを使い続けないようにする。
+     RP_BUILD と各ファイルの BUILD が一致しない場合（置き場所に古いファイルが残っている場合）は、画面にその旨を表示する -->
+<script>window.RP_BUILD = "2026.11.26c";</script>
+<script src="./src/config.js?v=2026.11.26c"></script>
+<script src="./src/sso.js?v=2026.11.26c"></script>
+<script src="./src/sfdata.js?v=2026.11.26c"></script>
+<script src="./src/data.js?v=2026.11.26c"></script>
+<script src="./src/utils.js?v=2026.11.26c"></script>
+<script type="text/babel" data-presets="react" src="./src/components.jsx?v=2026.11.26c"></script>
+<script type="text/babel" data-presets="react" src="./src/pages.jsx?v=2026.11.26c"></script>
+<script type="text/babel" data-presets="react" src="./src/app.jsx?v=2026.11.26c"></script>
 </body>
 </html>

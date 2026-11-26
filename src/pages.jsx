@@ -656,7 +656,7 @@ window.AppPages = (function () {
             tag ? h("span", { className: "cond" }, "#" + tag) : null,
             ptype ? h("span", { className: "cond" }, "種別: " + ptype) : null,
             venueF ? h("span", { className: "cond" }, "会場: " + venueF) : null,
-            amin || amax ? h("span", { className: "cond" }, "売上: " + amountRangeLabel(amin, amax)) : null,
+            amin || amax ? h("span", { className: "cond" }, "予算: " + amountRangeLabel(amin, amax)) : null,
             h(
               "button",
               { type: "button", className: "link-btn", onClick: clearAll },
@@ -826,7 +826,7 @@ window.AppPages = (function () {
           "select",
           {
             className: "text-input",
-            "aria-label": "売上金額の下限",
+            "aria-label": "予算の下限",
             value: props.amin,
             onChange: function (e) {
               props.onChange(e.target.value, props.amax, "min");
@@ -842,7 +842,7 @@ window.AppPages = (function () {
           "select",
           {
             className: "text-input",
-            "aria-label": "売上金額の上限",
+            "aria-label": "予算の上限",
             value: props.amax,
             onChange: function (e) {
               props.onChange(props.amin, e.target.value, "max");
@@ -858,8 +858,8 @@ window.AppPages = (function () {
         "div",
         { className: "sidebar-hint" },
         props.salesBands.length
-          ? "該当 " + count + " 件（売上金額が入っている投稿 " + props.salesBands.length + " 件のうち）"
-          : "売上金額が入った投稿はまだありません"
+          ? "該当 " + count + " 件（予算が入っている投稿 " + props.salesBands.length + " 件のうち）"
+          : "予算が入った投稿はまだありません"
       ),
       props.amin || props.amax
         ? h(
@@ -871,7 +871,7 @@ window.AppPages = (function () {
                 props.onChange("", "");
               },
             },
-            "売上金額の条件を解除"
+            "予算の条件を解除"
           )
         : null
     );
@@ -971,7 +971,7 @@ window.AppPages = (function () {
       props.showAmount
         ? h(
             SidebarSection,
-            { id: "amount", title: "売上金額", active: props.amin || props.amax ? amountRangeLabel(props.amin, props.amax) : "" },
+            { id: "amount", title: "予算", active: props.amin || props.amax ? amountRangeLabel(props.amin, props.amax) : "" },
             h(AmountRange, { amin: props.amin, amax: props.amax, salesBands: props.salesBands, onChange: props.onAmountRange })
           )
         : null,
@@ -1484,7 +1484,7 @@ window.AppPages = (function () {
           // 売上金額（金額帯）。正確な金額ではなく、帯で表示する
           typeof project.salesBand === "number" ? h("span", null, "·") : null,
           typeof project.salesBand === "number"
-            ? h("span", { className: "sales-band", title: "売上金額（金額帯）" }, "売上 " + AppUtils.salesBandLabel(project.salesBand))
+            ? h("span", { className: "sales-band", title: "予算（金額帯）" }, "予算 " + AppUtils.salesBandLabel(project.salesBand))
             : null
         ),
         h(PostMeta, { project: project }),
@@ -3452,6 +3452,7 @@ window.AppPages = (function () {
   }
 
   return {
+    BUILD: "2026.11.26c",
     LoginPage: LoginPage,
     FeedPage: FeedPage,
     TimelinePage: TimelinePage,
