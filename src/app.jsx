@@ -942,51 +942,6 @@
           })
         );
       },
-      // 物件Noがある投稿の売上金額（金額帯）を、Salesforceからまとめて取得し直す。onProgress(済み件数, 全件数)
-      refreshSalesBands: function (onProgress) {
-        var targets = posts.filter(function (p) {
-          return p.propertyNo;
-        });
-        var result = { updated: 0, unchanged: 0, notFound: 0, failed: 0, total: targets.length };
-        return targets
-          .reduce(function (chain, p, i) {
-            return chain.then(function () {
-              return AppSSO.searchOpportunityByPropertyNo(p.propertyNo)
-                .then(function (opp) {
-                  if (!opp) {
-                    result.notFound++;
-                    return;
-                  }
-                  var band = AppUtils.salesBand(opp.amount);
-                  if (band === p.salesBand) {
-                    result.unchanged++;
-                    return;
-                  }
-                  return AppSF.updatePostSalesBand(p.id, band).then(function () {
-                    result.updated++;
-                  });
-                })
-                .catch(function (e) {
-                  if (e && e.status === 401) throw e;
-                  result.failed++;
-                })
-                .then(function () {
-                  if (onProgress) onProgress(i + 1, targets.length);
-                });
-            });
-          }, Promise.resolve())
-          .then(function () {
-            return reloadPosts();
-          })
-          .then(
-            function () {
-              return Object.assign({ ok: true }, result);
-            },
-            function (e) {
-              return { ok: false, error: e.message };
-            }
-          );
-      },
       deleteTagGlobally: function (tag) {
         var key = AppUtils.tagKey(tag);
         var targets = posts.filter(function (p) {
