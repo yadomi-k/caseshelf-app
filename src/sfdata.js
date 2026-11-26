@@ -616,7 +616,7 @@ window.AppSF = (function () {
   }
 
   return {
-    BUILD: "2026.11.26",
+    BUILD: "2026.11.26b",
     OBJ: OBJ,
     findUserByEmail: findUserByEmail,
     loadUsers: loadUsers,
