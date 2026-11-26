@@ -348,6 +348,8 @@ window.AppSSO = (function () {
       // 会場（会場マスタを参照する項目）。参照先の会場名を投稿の「会場」に自動入力する。空なら使わない
       venueField: o.venueField || "",
       venueNameField: o.venueNameField || "Name",
+      // 売上金額（金額帯にして投稿に保存し、金額で検索できるようにする）。空なら使わない
+      amountField: o.amountField === undefined ? "OrderEstimate__c" : o.amountField || "",
     };
   }
 
@@ -376,6 +378,7 @@ window.AppSSO = (function () {
     // 物件種別・会場は、項目が無い（参照できない）場合はそれ抜きで検索する
     var ok = /^[A-Za-z0-9_]+$/;
     var typeField = ok.test(oc.propertyTypeField) && !unavailable.type ? oc.propertyTypeField : "";
+    var amountField = ok.test(oc.amountField) && !unavailable.amount ? oc.amountField : "";
     var venuePath =
       /^[A-Za-z0-9_]+__c$/.test(oc.venueField) && ok.test(oc.venueNameField) && !unavailable.venue
         ? oc.venueField.replace(/__c$/, "__r") + "." + oc.venueNameField
@@ -383,6 +386,7 @@ window.AppSSO = (function () {
     function run() {
       var q =
         "SELECT Id, Name" + (typeField ? ", " + typeField : "") + (venuePath ? ", " + venuePath : "") +
+        (amountField ? ", " + amountField : "") +
         " FROM " + oc.object +
         " WHERE " + oc.propertyNoField + " = " + soqlString(no) +
         " LIMIT 2";
@@ -394,6 +398,11 @@ window.AppSSO = (function () {
           if (typeField && e.message.indexOf(typeField) !== -1) {
             unavailable.type = true;
             typeField = "";
+            return attempt();
+          }
+          if (amountField && e.message.indexOf(amountField) !== -1) {
+            unavailable.amount = true;
+            amountField = "";
             return attempt();
           }
           if (venuePath && e.message.indexOf(venuePath.split(".")[0]) !== -1) {
@@ -428,6 +437,8 @@ window.AppSSO = (function () {
           multiple: recs.length > 1,
           propertyTypes: typeField ? cleanPropertyTypes(r[typeField]) : [],
           venue: String(venue).trim(),
+          // 売上金額（数値）。項目が無い・空なら null
+          amount: amountField && typeof r[amountField] === "number" ? r[amountField] : null,
         };
       });
   }
@@ -463,7 +474,7 @@ window.AppSSO = (function () {
 
   // 物件種別の値から、先頭（または末尾）の「番号と/」を除く。例: "01/展示会" → "展示会"
   // 複数選択の選択リスト（「;」区切り）にも対応する
-  var unavailable = { type: false, venue: false };
+  var unavailable = { type: false, venue: false, amount: false };
   function cleanPropertyTypes(value) {
     if (value === null || value === undefined) return [];
     return String(value)
