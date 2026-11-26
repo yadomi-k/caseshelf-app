@@ -489,6 +489,7 @@ window.AppSSO = (function () {
   }
 
   return {
+    BUILD: "2026.11.26",
     getSession: getSession,
     endSession: endSession,
     api: api,

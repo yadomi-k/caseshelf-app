@@ -186,6 +186,7 @@ window.AppUtils = (function () {
   }
 
   return {
+    BUILD: "2026.11.26",
     normalizeTag: normalizeTag,
     tagKey: tagKey,
     uniqueTags: uniqueTags,

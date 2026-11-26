@@ -1175,12 +1175,119 @@
           )
         ),
       }),
-      h("main", { className: "content" }, page),
+      h("main", { className: "content" }, h(ErrorBoundary, { key: route.name + (route.params.id || "") }, page)),
       h(C.BottomNav, { active: activeNavKey }),
       h(C.Toast, { toasts: toasts })
     );
   }
 
+  // ---------------- 画面の表示中にエラーが起きたとき ----------------
+  // 真っ白にならないよう、理由と「再読み込み」を表示する
+  class ErrorBoundary extends React.Component {
+    constructor(props) {
+      super(props);
+      this.state = { error: null };
+    }
+    static getDerivedStateFromError(error) {
+      return { error: error };
+    }
+    componentDidCatch(error) {
+      try {
+        console.error("RecordPOOL: 画面の表示中にエラーが発生しました", error);
+      } catch (e) {}
+    }
+    render() {
+      if (!this.state.error) return this.props.children;
+      var self = this;
+      return h(
+        "div",
+        { className: "center-loading load-error" },
+        h("p", null, "画面を表示できませんでした。"),
+        h(
+          "p",
+          { className: "load-error-detail" },
+          "ページを再読み込みしても直らない場合は、管理者にこの画面の内容を伝えてください。"
+        ),
+        h("p", { className: "load-error-detail" }, String((this.state.error && this.state.error.message) || this.state.error)),
+        h(
+          "button",
+          {
+            className: "btn primary",
+            onClick: function () {
+              window.location.reload();
+            },
+          },
+          "再読み込み"
+        ),
+        h(
+          "button",
+          {
+            className: "btn ghost",
+            onClick: function () {
+              window.location.hash = "#/timeline";
+              self.setState({ error: null });
+            },
+          },
+          "タイムラインへ戻る"
+        )
+      );
+    }
+  }
+
+  // ---------------- ファイルの版のチェック ----------------
+  // 置き場所に古いファイルが残っていると、一部の画面だけ動かなくなる。起動時に確かめて、どのファイルが古いかを表示する
+  var BUILD = "2026.11.26";
+  function outdatedFiles() {
+    var expected = window.RP_BUILD;
+    if (!expected) return [];
+    var files = [
+      ["src/sso.js", window.AppSSO],
+      ["src/sfdata.js", window.AppSF],
+      ["src/data.js", window.AppData],
+      ["src/utils.js", window.AppUtils],
+      ["src/components.jsx", window.AppComponents],
+      ["src/pages.jsx", window.AppPages],
+      ["src/app.jsx", { BUILD: BUILD }],
+    ];
+    return files
+      .filter(function (f) {
+        return !f[1] || f[1].BUILD !== expected;
+      })
+      .map(function (f) {
+        return f[0];
+      });
+  }
+
+  function OutdatedNotice(props) {
+    return h(
+      "div",
+      { className: "center-loading load-error" },
+      h("p", null, "RecordPOOLのファイルの一部が古いままです。"),
+      h(
+        "p",
+        { className: "load-error-detail" },
+        "アプリを置いている場所に、次のファイルの古い版が残っています（index.html の版: " + (window.RP_BUILD || "不明") + "）。"
+      ),
+      h("p", { className: "load-error-detail" }, props.files.join("、")),
+      h(
+        "p",
+        { className: "load-error-detail" },
+        "GitHub の main から最新のファイル一式を取得し、置き場所のファイルをすべて上書きしてから、再読み込みしてください。"
+      ),
+      h(
+        "button",
+        {
+          className: "btn primary",
+          onClick: function () {
+            window.location.reload();
+          },
+        },
+        "再読み込み"
+      )
+    );
+  }
+
   var root = ReactDOM.createRoot(document.getElementById("root"));
-  root.render(h(App));
+  var outdated = outdatedFiles();
+  root.render(outdated.length ? h(OutdatedNotice, { files: outdated }) : h(ErrorBoundary, null, h(App)));
 })();

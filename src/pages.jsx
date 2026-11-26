@@ -3452,6 +3452,7 @@ window.AppPages = (function () {
   }
 
   return {
+    BUILD: "2026.11.26",
     LoginPage: LoginPage,
     FeedPage: FeedPage,
     TimelinePage: TimelinePage,
