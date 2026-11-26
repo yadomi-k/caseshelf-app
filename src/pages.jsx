@@ -1480,7 +1480,12 @@ window.AppPages = (function () {
           h("span", null, "·"),
           h("span", null, AppUtils.formatDateTime(project.createdAt)),
           project.propertyNo ? h("span", null, "·") : null,
-          project.propertyNo ? h("span", null, "物件No " + project.propertyNo) : null
+          project.propertyNo ? h("span", null, "物件No " + project.propertyNo) : null,
+          // 売上金額（金額帯）。正確な金額ではなく、帯で表示する
+          typeof project.salesBand === "number" ? h("span", null, "·") : null,
+          typeof project.salesBand === "number"
+            ? h("span", { className: "sales-band", title: "売上金額（金額帯）" }, "売上 " + AppUtils.salesBandLabel(project.salesBand))
+            : null
         ),
         h(PostMeta, { project: project }),
         h(DesignStaffList, { staff: project.designStaff, store: store }),
