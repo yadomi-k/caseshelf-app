@@ -165,7 +165,7 @@ window.AppData = (function () {
   var SAMPLE_PROJECTS = makeSeedProjects();
 
   return {
-    BUILD: "2026.11.26b",
+    BUILD: "2026.11.26c",
     uid: uid,
     avatarColor: avatarColor,
     // 表示するサンプル投稿（設定でオフにした場合は空）

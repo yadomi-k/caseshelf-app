@@ -3452,7 +3452,7 @@ window.AppPages = (function () {
   }
 
   return {
-    BUILD: "2026.11.26b",
+    BUILD: "2026.11.26c",
     LoginPage: LoginPage,
     FeedPage: FeedPage,
     TimelinePage: TimelinePage,

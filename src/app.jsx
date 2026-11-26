@@ -1236,7 +1236,7 @@
 
   // ---------------- ファイルの版のチェック ----------------
   // 置き場所に古いファイルが残っていると、一部の画面だけ動かなくなる。起動時に確かめて、どのファイルが古いかを表示する
-  var BUILD = "2026.11.26b";
+  var BUILD = "2026.11.26c";
   function outdatedFiles() {
     var expected = window.RP_BUILD;
     if (!expected) return [];
