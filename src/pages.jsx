@@ -1480,7 +1480,12 @@ window.AppPages = (function () {
           h("span", null, "·"),
           h("span", null, AppUtils.formatDateTime(project.createdAt)),
           project.propertyNo ? h("span", null, "·") : null,
-          project.propertyNo ? h("span", null, "物件No " + project.propertyNo) : null
+          project.propertyNo ? h("span", null, "物件No " + project.propertyNo) : null,
+          // 売上金額（金額帯）。正確な金額ではなく、帯で表示する
+          typeof project.salesBand === "number" ? h("span", null, "·") : null,
+          typeof project.salesBand === "number"
+            ? h("span", { className: "sales-band", title: "売上金額（金額帯）" }, "売上 " + AppUtils.salesBandLabel(project.salesBand))
+            : null
         ),
         h(PostMeta, { project: project }),
         h(DesignStaffList, { staff: project.designStaff, store: store }),
@@ -2911,56 +2916,6 @@ window.AppPages = (function () {
     );
   }
 
-  // 売上金額の一括取得（管理者のみ）
-  function SalesBandRefresh(props) {
-    var store = props.store;
-    var _st = useState(null); // { done, total } 実行中 / { result } 完了
-    var st = _st[0],
-      setSt = _st[1];
-    var running = st && !st.result;
-    var count = store.projects.filter(function (p) {
-      return !p.isSample && p.propertyNo;
-    }).length;
-    function run() {
-      if (running) return;
-      setSt({ done: 0, total: count });
-      store.admin
-        .refreshSalesBands(function (done, total) {
-          setSt({ done: done, total: total });
-        })
-        .then(function (res) {
-          setSt({ result: res });
-          store.toast(res.ok ? "売上金額を取得しました。" : res.error, res.ok ? "success" : "error");
-        });
-    }
-    var r = st && st.result;
-    return h(
-      "div",
-      { className: "admin-box" },
-      h("h2", null, "売上金額の取得"),
-      h(
-        "p",
-        { className: "form-hint" },
-        "売上金額は、投稿の保存時に物件Noから自動で取得します（画面には表示せず、一覧の検索に使います）。" +
-          "以前の投稿や、Salesforceで金額が変わった場合は、ここからまとめて取得し直せます（物件Noがある投稿 " + count + " 件）。"
-      ),
-      h(
-        "button",
-        { type: "button", className: "btn", onClick: run, disabled: running || !count },
-        running ? "取得中... " + st.done + " / " + st.total : "売上金額をまとめて取得する"
-      ),
-      r && r.ok
-        ? h(
-            "p",
-            { className: "form-hint" },
-            "完了：更新 " + r.updated + " 件・変更なし " + r.unchanged + " 件" +
-              (r.notFound ? "・商談が見つからない " + r.notFound + " 件" : "") +
-              (r.failed ? "・失敗 " + r.failed + " 件" : "")
-          )
-        : null
-    );
-  }
-
   // 利用者の編集（管理者のみ）：表示名・メールアドレス・権限
   function EditUserDialog(props) {
     var store = props.store;
@@ -3385,8 +3340,6 @@ window.AppPages = (function () {
         },
         onConfirm: handleDeleteUser,
       }),
-
-      AppSF.salesBandAvailable() ? h(SalesBandRefresh, { store: store }) : null,
 
       h("h2", null, "投稿の管理"),
       h(

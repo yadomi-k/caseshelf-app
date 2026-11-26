@@ -1890,4 +1890,4 @@ a.design-staff-person.linked:hover { border-color: var(--color-accent); }
 .amount-tilde { flex: none; color: var(--color-text-dim); font-size: 0.8125rem; }
 .amount-range .sidebar-hint { margin-top: 0.375rem; }
 
-.admin-box { margin: 1.25rem 0; }
+.sales-band { font-weight: 600; color: var(--color-text); }

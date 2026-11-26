@@ -63,6 +63,13 @@ window.AppUtils = (function () {
   function salesBandEnd(band) {
     return band + (band < 5000000 ? 500000 : 1000000) - 1;
   }
+  // 金額帯の表示（例: 300万 → 「300万〜349万円」、0 → 「50万円未満」）
+  function salesBandLabel(band) {
+    if (typeof band !== "number") return "";
+    if (band === 0) return "50万円未満";
+    return formatManYen(band).replace(/円$/, "") + "〜" + formatManYen(salesBandEnd(band));
+  }
+
   // 金額を「○万円」「○億○万円」と表示する
   function formatManYen(yen) {
     var man = Math.floor(yen / 10000);
@@ -186,6 +193,7 @@ window.AppUtils = (function () {
     salesBand: salesBand,
     salesBandEnd: salesBandEnd,
     formatManYen: formatManYen,
+    salesBandLabel: salesBandLabel,
     classNames: classNames,
     clamp: clamp,
     formatBytes: formatBytes,

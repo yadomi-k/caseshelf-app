@@ -635,10 +635,6 @@ window.AppSF = (function () {
     salesBandAvailable: function () {
       return optionalPostFields.SalesBand__c;
     },
-    // 投稿の金額帯だけを更新する（管理者の一括取得用）
-    updatePostSalesBand: function (postId, band) {
-      return update(OBJ.post, postId, { SalesBand__c: band });
-    },
     designDepartments: function () {
       return designConfig().departments;
     },
