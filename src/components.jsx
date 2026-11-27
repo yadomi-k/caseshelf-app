@@ -998,7 +998,7 @@ window.AppComponents = (function () {
   }
 
   return {
-    BUILD: "2026.11.26c",
+    BUILD: "2026.11.27",
     Logo: Logo,
     Loader: Loader,
     Avatar: Avatar,
