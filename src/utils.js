@@ -52,6 +52,16 @@ window.AppUtils = (function () {
     }
   }
 
+  // 物件Noの比較用：前後の空白・全角英数字・大文字小文字の違いを無視する
+  function normalizePropertyNo(no) {
+    return String(no || "")
+      .replace(/[Ａ-Ｚａ-ｚ０-９－]/g, function (c) {
+        return String.fromCharCode(c.charCodeAt(0) - 0xfee0);
+      })
+      .replace(/[\s\u3000]+/g, "")
+      .toUpperCase();
+  }
+
   // 売上金額を金額帯にする（500万円未満は50万円単位、500万円以上は100万円単位で切り捨て）
   // 例: 348万 → 300万、489万 → 450万、730万 → 700万。金額が無ければ null
   function salesBand(amount) {
@@ -186,12 +196,13 @@ window.AppUtils = (function () {
   }
 
   return {
-    BUILD: "2026.11.26c",
+    BUILD: "2026.11.27",
     normalizeTag: normalizeTag,
     tagKey: tagKey,
     uniqueTags: uniqueTags,
     formatDateTime: formatDateTime,
     salesBand: salesBand,
+    normalizePropertyNo: normalizePropertyNo,
     salesBandEnd: salesBandEnd,
     formatManYen: formatManYen,
     salesBandLabel: salesBandLabel,

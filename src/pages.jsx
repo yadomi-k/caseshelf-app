@@ -1930,8 +1930,21 @@ window.AppPages = (function () {
       );
     }
 
+    // 同じ物件Noの投稿（自分自身＝編集中の投稿とサンプルは除く）
+    var dupPost = (function () {
+      var key = AppUtils.normalizePropertyNo(propNo);
+      if (!key) return null;
+      return (
+        store.projects.find(function (p) {
+          return !p.isSample && (!existing || p.id !== existing.id) && AppUtils.normalizePropertyNo(p.propertyNo) === key;
+        }) || null
+      );
+    })();
+    var dupMessage = dupPost ? "物件No「" + propNo.trim() + "」はすでに投稿されています（" + dupPost.title + "）。" : "";
+
     function validate() {
       var errs = {};
+      if (dupPost) errs.propNo = dupMessage;
       if (!title.trim()) errs.title = "案件名を入力してください。";
       var doneDonePhotos = photos.filter(function (p) {
         return p.status === "done";
@@ -2002,10 +2015,31 @@ window.AppPages = (function () {
       };
 
       setSaving(true);
-      resolveSalesBand().then(function (band) {
-        if (band !== undefined) payload.salesBand = band;
-        submitPayload(payload);
-      });
+      // ほかの人が同じ物件Noで投稿したばかりの場合に備えて、保存の直前にもSalesforceで確かめる
+      AppSF.findPostByPropertyNo(payload.propertyNo, existing ? existing.id : null)
+        .then(
+          function (found) {
+            return found;
+          },
+          function () {
+            return null; // 確かめられなかった場合は、画面上の確認だけで進める
+          }
+        )
+        .then(function (found) {
+          if (found) {
+            setSaving(false);
+            var msg = "物件No「" + payload.propertyNo + "」はすでに投稿されています（" + found.title + "）。";
+            setErrors(function (prev) {
+              return Object.assign({}, prev, { propNo: msg });
+            });
+            store.toast(msg, "error");
+            return;
+          }
+          return resolveSalesBand().then(function (band) {
+            if (band !== undefined) payload.salesBand = band;
+            submitPayload(payload);
+          });
+        });
     }
 
     // 売上金額の金額帯（画面には出さず、検索に使う）。
@@ -2095,6 +2129,11 @@ window.AppPages = (function () {
             autoFocus: !isEdit,
             onChange: function (e) {
               setPropNo(e.target.value);
+              if (errors.propNo) {
+                setErrors(function (prev) {
+                  return Object.assign({}, prev, { propNo: null });
+                });
+              }
               if (sfSearch.state !== "searching") setSfSearch({ state: "idle", message: "" });
             },
             onKeyDown: function (e) {
@@ -2117,6 +2156,17 @@ window.AppPages = (function () {
             sfSearch.state === "searching" ? "検索中..." : "Salesforceで検索"
           )
         ),
+        dupPost
+          ? h(
+              "div",
+              { className: "error dup-propno", role: "alert" },
+              dupMessage + "同じ物件Noは登録できません。写真を追加する場合は、",
+              h("a", { href: "#/project/" + dupPost.id }, "その投稿"),
+              "を開いて編集してください。"
+            )
+          : errors.propNo
+          ? h("div", { className: "error", role: "alert" }, errors.propNo)
+          : null,
         sfSearch.message
           ? h(
               "div",
@@ -2717,7 +2767,7 @@ window.AppPages = (function () {
         "div",
         { className: "profile-stats" },
         h("div", null, h("b", null, posts.length), " 件の投稿"),
-        showDesigned ? h("div", null, h("b", null, designed.length), " 件のデザイン担当") : null,
+        showDesigned ? h("div", null, h("b", null, designed.length), " 件の担当") : null,
         props.extraStat || null
       ),
       showDesigned
@@ -2726,7 +2776,7 @@ window.AppPages = (function () {
         { className: "profile-tabs", role: "tablist" },
         [
           { key: "posts", label: "投稿", count: posts.length },
-          { key: "designed", label: "デザイン担当", count: designed.length },
+          { key: "designed", label: "担当", count: designed.length },
         ].map(function (t) {
           return h(
             "button",
@@ -2750,7 +2800,7 @@ window.AppPages = (function () {
         key: tab,
         projects: list,
         reactionsFor: store.reactionsAvailable ? store.reactionsFor : null,
-        emptyMessage: tab === "posts" ? props.emptyPosts : "デザイン担当した案件はまだありません。",
+        emptyMessage: tab === "posts" ? props.emptyPosts : "担当した案件はまだありません。",
       })
     );
   }
@@ -3452,7 +3502,7 @@ window.AppPages = (function () {
   }
 
   return {
-    BUILD: "2026.11.26c",
+    BUILD: "2026.11.27",
     LoginPage: LoginPage,
     FeedPage: FeedPage,
     TimelinePage: TimelinePage,

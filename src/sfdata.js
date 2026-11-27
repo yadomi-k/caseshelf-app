@@ -528,6 +528,18 @@ window.AppSF = (function () {
     });
   }
 
+  // 同じ物件Noの投稿を探す（excludeId の投稿は除く）。見つかれば { id, title }、無ければ null
+  function findPostByPropertyNo(propertyNo, excludeId) {
+    var no = String(propertyNo || "").trim();
+    if (!no) return Promise.resolve(null);
+    return query(
+      "SELECT Id, Title__c FROM " + OBJ.post + " WHERE PropertyNo__c = " + q(no) +
+        (excludeId ? " AND Id != " + q(excludeId) : "") + " LIMIT 1"
+    ).then(function (rs) {
+      return rs.length ? { id: rs[0].Id, title: rs[0].Title__c || "" } : null;
+    });
+  }
+
   function updatePostTags(postId, tags) {
     return update(OBJ.post, postId, { Tags__c: tags.join("\n") });
   }
@@ -616,7 +628,7 @@ window.AppSF = (function () {
   }
 
   return {
-    BUILD: "2026.11.26c",
+    BUILD: "2026.11.27",
     OBJ: OBJ,
     findUserByEmail: findUserByEmail,
     loadUsers: loadUsers,
@@ -655,6 +667,7 @@ window.AppSF = (function () {
     updatePost: updatePost,
     deletePost: deletePost,
     updatePostTags: updatePostTags,
+    findPostByPropertyNo: findPostByPropertyNo,
     changePostOwner: changePostOwner,
     addSave: addSave,
     removeSave: removeSave,
